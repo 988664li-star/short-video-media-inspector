@@ -164,7 +164,7 @@ class ConfigManager:
         )
 
         if app_name in default_config:
-            # 将app_name作为外层键 # https://gitee.com/xi-tong-li/tiktok-analysis-platform  #629
+            # 将app_name作为外层键 # https://github.com/Johnserf-Seed/TikTokDownload/issues/626  #629
             app_config = {app_name: default_config[app_name]}
 
             # 写入应用程序特定配置

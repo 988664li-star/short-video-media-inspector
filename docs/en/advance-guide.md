@@ -9,7 +9,7 @@ Advanced usage refers to improving tool efficiency or solving specific issues us
 :::
 
 ::: info :mag: Have Questions?
-If you encounter any issues during development, please describe them in detail and ask in [F2 Discussions](https://gitee.com/xi-tong-li/tiktok-analysis-platform/discussions/categories/q-a), or contact `support@f2.wiki` via email with your inquiry. I will respond as soon as possible.
+If you encounter any issues during development, please describe them in detail and ask in [F2 Discussions](https://github.com/Johnserf-Seed/f2/discussions/categories/q-a), or contact `support@f2.wiki` via email with your inquiry. I will respond as soon as possible.
 :::
 
 ## Douyin

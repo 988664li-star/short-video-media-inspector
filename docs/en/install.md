@@ -90,19 +90,19 @@ Clone the repository and build the project with the following commands:
 ::: code-group
 
 ```sh [Windows]
-$ git clone https://gitee.com/xi-tong-li/tiktok-analysis-platform.git
+$ git clone https://github.com/Johnserf-Seed/f2.git
 $ cd f2
 $ pip install -e .  # Install in development mode
 ```
 
 ```sh [Linux]
-$ git clone https://gitee.com/xi-tong-li/tiktok-analysis-platform.git
+$ git clone https://github.com/Johnserf-Seed/f2.git
 $ cd f2
 $ pip3 install -e . # Install in development mode
 ```
 
 ```sh [MacOS]
-$ git clone https://gitee.com/xi-tong-li/tiktok-analysis-platform.git
+$ git clone https://github.com/Johnserf-Seed/f2.git
 $ cd f2
 $ pip3 install -e . # Install in development mode
 ```
@@ -112,7 +112,7 @@ $ pip3 install -e . # Install in development mode
 
 1. First, `fork` this project and clone your fork.
 2. Submit your ideas in `Discussions`, or report issues in `Issues`.
-3. After updating your code, submit a `PR` following the instructions in [CONTRIBUTING](https://gitee.com/xi-tong-li/tiktok-analysis-platform/blob/master/CONTRIBUTING.en.md).
+3. After updating your code, submit a `PR` following the instructions in [CONTRIBUTING](https://github.com/Johnserf-Seed/f2/blob/main/CONTRIBUTING.en.md).
 
 ### Test the Latest Features
 

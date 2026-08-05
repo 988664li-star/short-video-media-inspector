@@ -6,7 +6,7 @@
 @Author     :JohnserfSeed
 @version    :0.0.1.7
 @License    :Apache License 2.0
-@Github     :https://gitee.com/xi-tong-li/tiktok-analysis-platform
+@Github     :https://github.com/johnserf-seed
 @Mail       :support@f2.wiki
 -------------------------------------------------
 Change Log  :
@@ -102,7 +102,7 @@ def main() -> None:
     table.add_row(
         _("Issues❓"),
         _(
-            "[green]这里说不定有你需要的答案 [link=https://gitee.com/xi-tong-li/tiktok-analysis-platform/issues]Click Here[/]"
+            "[green]这里说不定有你需要的答案 [link=https://github.com/Johnserf-Seed/f2/issues]Click Here[/]"
         ),
     ),
     table.add_row(

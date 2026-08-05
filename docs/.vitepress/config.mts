@@ -40,7 +40,7 @@ export default defineConfig({
     // https://vitepress.dev/reference/default-theme-config
     logo: { src: '/f2-logo-with-shadow-svg@1.0x.svg', width: 24, height: 24 },
     socialLinks: [
-      { icon: 'github', link: 'https://gitee.com/xi-tong-li/tiktok-analysis-platform', ariaLabel: 'GitHub' },
+      { icon: 'github', link: 'https://github.com/Johnserf-Seed/f2', ariaLabel: 'GitHub' },
       { icon: 'discord', link: 'https://discord.gg/3PhtPmgHf8', ariaLabel: 'Discord' },
       { icon: 'gmail', link: 'mailto:support@f2.wiki', ariaLabel: 'Email' },
     ],
@@ -54,7 +54,7 @@ export default defineConfig({
       copyright: 'Copyright © 2023-present Johnserf Seed'
     },
     editLink: {
-      pattern: 'https://gitee.com/xi-tong-li/tiktok-analysis-platform/edit/main/docs/:path',
+      pattern: 'https://github.com/Johnserf-Seed/f2/edit/main/docs/:path',
       text: 'Edit this page on GitHub'
     },
   },
@@ -215,11 +215,11 @@ function cn_nav(): DefaultTheme.NavItem[] {
       items: [
         {
           text: '更新日志',
-          link: 'https://gitee.com/xi-tong-li/tiktok-analysis-platform/blob/master/CHANGELOG.md'
+          link: 'https://github.com/Johnserf-Seed/f2/blob/main/CHANGELOG.md'
         },
         {
           text: '贡献指南',
-          link: 'https://gitee.com/xi-tong-li/tiktok-analysis-platform/blob/master/CONTRIBUTING.md'
+          link: 'https://github.com/Johnserf-Seed/f2/blob/main/CONTRIBUTING.md'
         }
       ]
     },
@@ -263,11 +263,11 @@ function en_nav(): DefaultTheme.NavItem[] {
       items: [
         {
           text: 'Changelog',
-          link: 'https://gitee.com/xi-tong-li/tiktok-analysis-platform/blob/master/CHANGELOG.md'
+          link: 'https://github.com/Johnserf-Seed/f2/blob/main/CHANGELOG.md'
         },
         {
           text: 'Contributing',
-          link: 'https://gitee.com/xi-tong-li/tiktok-analysis-platform/blob/master/CONTRIBUTING.md'
+          link: 'https://github.com/Johnserf-Seed/f2/blob/main/CONTRIBUTING.md'
         }
       ]
     }

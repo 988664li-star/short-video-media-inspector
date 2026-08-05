@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "🚀Asynchronous based full-platform download tool"
 readme = "README.md"
 license = "Apache-2.0"
-repository = "https://gitee.com/xi-tong-li/tiktok-analysis-platform"
+repository = "https://github.com/Johnserf-Seed/f2"
 requires-python = ">=3.10"
 authors = [
     { name = "Johnserf-Seed", email = "support@f2.wiki" },
@@ -89,11 +89,11 @@ dependencies = [
 f2 = "f2.cli.cli_commands:main"
 
 [project.urls]
-Homepage = "https://gitee.com/xi-tong-li/tiktok-analysis-platform"
+Homepage = "https://github.com/Johnserf-Seed/f2"
 Documentation = "https://f2.wiki/"
 Chat = "https://discord.gg//3PhtPmgHf8"
-"Source Code" = "https://gitee.com/xi-tong-li/tiktok-analysis-platform"
-"Issue Tracker" = "https://gitee.com/xi-tong-li/tiktok-analysis-platform/issues"
+"Source Code" = "https://github.com/Johnserf-Seed/f2"
+"Issue Tracker" = "https://github.com/Johnserf-Seed/f2/issues"
 
 [tool.hatch.version]
 path = "f2/__init__.py"

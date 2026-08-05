@@ -90,19 +90,19 @@ $ pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple f2
 ::: code-group
 
 ```sh [Windows]
-$ git clone https://gitee.com/xi-tong-li/tiktok-analysis-platform.git
+$ git clone https://github.com/Johnserf-Seed/f2.git
 $ cd f2
 $ pip install -e .  # 在当前目录下进行开发安装
 ```
 
 ```sh [Linux]
-$ git clone https://gitee.com/xi-tong-li/tiktok-analysis-platform.git
+$ git clone https://github.com/Johnserf-Seed/f2.git
 $ cd f2
 $ pip3 install -e . # 在当前目录下进行开发安装
 ```
 
 ```sh [MacOS]
-$ git clone https://gitee.com/xi-tong-li/tiktok-analysis-platform.git
+$ git clone https://github.com/Johnserf-Seed/f2.git
 $ cd f2
 $ pip3 install -e . # 在当前目录下进行开发安装
 ```
@@ -112,7 +112,7 @@ $ pip3 install -e . # 在当前目录下进行开发安装
 
 1. 请先 `fork` 本项目，然后克隆你的项目。
 2. 在 `Discussions` 中提出你的想法，或者在 `Issues` 中报告错误。
-3. 更新完代码后，按照 [CONTRIBUTING](https://gitee.com/xi-tong-li/tiktok-analysis-platform/blob/master/CONTRIBUTING.md) 的指导提交 `PR`。
+3. 更新完代码后，按照 [CONTRIBUTING](https://github.com/Johnserf-Seed/f2/blob/main/CONTRIBUTING.md) 的指导提交 `PR`。
 
 ### 测试最新功能
 

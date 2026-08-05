@@ -8,7 +8,7 @@
 @Author     :JohnserfSeed
 @version    :0.0.3
 @License    :Apache License 2.0
-@Github     :https://gitee.com/xi-tong-li/tiktok-analysis-platform
+@Github     :https://github.com/johnserf-seed
 @Mail       :support@f2.wiki
 -------------------------------------------------
 Change Log  :

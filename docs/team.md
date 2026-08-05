@@ -18,7 +18,7 @@ const coreMembers = [
     name: 'JohnserfSeed',
     title: '主创者',
     links: [
-      { icon: 'github', link: 'https://gitee.com/xi-tong-li/tiktok-analysis-platform', ariaLabel: 'GitHub' },
+      { icon: 'github', link: 'https://github.com/Johnserf-Seed', ariaLabel: 'GitHub' },
       { icon: 'discord', link: 'https://discord.gg/3PhtPmgHf8', ariaLabel: 'Discord' },
     ],
     sponsor: "https://patreon.com/F2_pypi",

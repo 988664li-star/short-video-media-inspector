@@ -51,8 +51,8 @@ If you see `WARNING: No matching works were found`, check if you have configured
 4. If you use `-i`, ensure it's configured correctly.
 :::
 **Reference Links:**
-- https://gitee.com/xi-tong-li/tiktok-analysis-platform/issues/42
-- https://gitee.com/xi-tong-li/tiktok-analysis-platform
+- https://github.com/Johnserf-Seed/f2/issues/42
+- https://github.com/Johnserf-Seed/TikTokDownload/issues/660
 
 ## EOF occurred in violation of protocol (_ssl.c:992)
 
@@ -97,8 +97,8 @@ Device IDs are tied to `cookies`, and a banned device ID results in invalid cook
 :::
 **Reference Links:**
 - https://f2.wiki/guide/apps/tiktok/overview#%E7%94%9F%E6%88%90deviceid-%F0%9F%9F%A2
-- https://gitee.com/xi-tong-li/tiktok-analysis-platform/issues/79
-- https://gitee.com/xi-tong-li/tiktok-analysis-platform/issues/154
+- https://github.com/Johnserf-Seed/f2/issues/79
+- https://github.com/Johnserf-Seed/f2/issues/154
 
 ## TypeError: object of type 'NoneType' has no len()
 

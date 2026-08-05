@@ -43,10 +43,16 @@
 
 `React + TypeScript + Vite` 前端，`FastAPI + F2` 数据服务，`faster-whisper` 本地语音识别。
 
+本项目在 [F2](https://github.com/Johnserf-Seed/f2) 的 Apache License 2.0 开源代码基础上二次开发，新增了抖音媒体检查台、AI 文案识别和可视化能力中心。原项目归属与本项目修改说明见 [NOTICE](NOTICE)。
+
+## 技术支持
+
+需要功能定制、二次开发或本地部署支持，可通过微信联系：`l2464w_t`。
+
 ## 能力边界
 
 - 数据可用性受作品权限、账号权限、地区限制和抖音上游接口变化影响。
 - 登录 Cookie 只用于访问当前账号本身有权查看的内容，页面不会回显 Cookie 明文。
 - 项目不会绕过平台权限；使用和保存平台内容时请遵守相关规则与法律。
 
-项目采用 [Apache License 2.0](LICENSE)。
+项目采用 [Apache License 2.0](LICENSE)，第三方归属与修改说明见 [NOTICE](NOTICE)。

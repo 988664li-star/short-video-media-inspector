@@ -1,0 +1,25 @@
+Third-Party Software Notices
+============================
+
+F2
+--
+
+This project incorporates source code from F2:
+https://github.com/Johnserf-Seed/f2
+
+Copyright (c) 2023-present Johnserf Seed and F2 contributors.
+F2 is licensed under the Apache License, Version 2.0. A copy of the
+license is included in the LICENSE file distributed with this project.
+
+Project Modifications
+---------------------
+
+Copyright (c) 2026 岁桐.
+
+This derivative project adds and maintains the Douyin media inspector,
+the FastAPI and React application layers, local speech transcription,
+the capability center, and related documentation and presentation assets.
+
+The Git history of this derivative repository records this project's
+distribution and modification history. It does not replace or supersede
+the copyright and attribution of F2 or its contributors.

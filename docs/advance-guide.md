@@ -9,7 +9,7 @@ outline: deep
 :::
 
 ::: info :mag: 欢迎提问
-如果您在开发过程中遇到任何疑问，请详细描述并在 [F2 Discussions](https://gitee.com/xi-tong-li/tiktok-analysis-platform/discussions/categories/q-a) 提问，或通过邮件联系 `support@f2.wiki`，描述您的来意，我将尽快为您解答。
+如果您在开发过程中遇到任何疑问，请详细描述并在 [F2 Discussions](https://github.com/Johnserf-Seed/f2/discussions/categories/q-a) 提问，或通过邮件联系 `support@f2.wiki`，描述您的来意，我将尽快为您解答。
 :::
 
 ## Douyin
