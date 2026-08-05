@@ -1,0 +1,37 @@
+.playback-panel, .details-panel { min-width: 0; padding: var(--space-4); }
+.video-stage { min-height: 27.5rem; display: grid; place-items: center; overflow: hidden; border: 1px solid #2f3b4a; border-radius: var(--radius-md); background: #05070a; }
+.video-stage video { width: 100%; height: min(45vh, 31.25rem); object-fit: contain; background: #05070a; }
+.media-unavailable { display: grid; place-items: center; min-height: 9.375rem; margin: 0; padding: 1.625rem; color: var(--color-text-muted); font-size: var(--text-base); text-align: center; }
+.media-unavailable--compact { min-height: 3.5rem; padding: var(--space-3); }
+.audio-section { margin-top: var(--space-3); padding: 0.8125rem 0.875rem 0.875rem; border: 1px solid var(--color-border-soft); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+.subsection-title h3 { margin: 0; font-size: var(--text-lg); }
+.subsection-title > span { color: var(--color-text-muted); font-size: var(--text-sm); }
+audio { display: block; width: 100%; height: 2.875rem; margin-top: var(--space-3); }
+
+.author-row { display: grid; grid-template-columns: 3.875rem minmax(0, 1fr); gap: 0.875rem; align-items: start; padding: 0.125rem var(--space-1) 0.875rem; }
+.author-row h2 { margin: var(--space-1) 0 0.4375rem; font-size: 1.1875rem; }
+.author-handle { display: block; margin: -0.125rem 0 0.4375rem; color: var(--color-link); font-size: var(--text-xs); }
+.author-row p { margin: 0; overflow: hidden; color: #bdc6d2; font-size: var(--text-base); line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.topic-list { display: flex; flex-wrap: wrap; gap: 0.3125rem 0.625rem; margin-top: var(--space-2); color: #ff969a; font-size: var(--text-xs); }
+.metadata { border-top: 1px solid var(--color-border-soft); }
+.metadata div { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: var(--space-3); padding: 0.5625rem 0.375rem; border-bottom: 1px solid var(--color-border-soft); }
+.metadata dt { color: var(--color-text-muted); font-size: var(--text-base); }
+.metadata dd { color: #e6eaf0; font: var(--text-base)/1.4 var(--font-mono); word-break: break-word; }
+
+.url-list { margin-top: var(--space-3); overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.url-row { min-height: 2.9375rem; display: grid; grid-template-columns: 6rem minmax(0, 1fr) 2.375rem 2.375rem; align-items: center; border-bottom: 1px solid var(--color-border-soft); background: var(--color-surface-raised); }
+.url-row:last-child { border-bottom: 0; }
+.url-row > span { padding-left: 0.875rem; color: var(--color-text-muted); font-size: var(--text-base); }
+.url-row code { min-width: 0; overflow: hidden; color: #aeb9c8; font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.url-row button, .url-row a { width: 2.125rem; height: 2.125rem; display: inline-grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: #dbe2ec; cursor: pointer; }
+.url-row button:hover, .url-row a:hover { background: var(--color-surface-soft); color: #fff; }
+.url-row svg { width: 1.125rem; height: 1.125rem; stroke-width: 1.75; }
+
+.gallery-section { margin-top: var(--space-3); padding: 0.875rem; border: 1px solid var(--color-border-soft); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+.gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5625rem; margin-top: var(--space-3); }
+.gallery figure { min-width: 0; }
+.gallery a { display: block; overflow: hidden; aspect-ratio: 3 / 4; border: 1px solid #3a4655; border-radius: 0.5625rem; background: #0b0e13; }
+.gallery a:hover { border-color: var(--color-accent); }
+.gallery img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--transition-normal); }
+.gallery a:hover img { transform: scale(1.025); }
+.gallery figcaption { margin-top: 0.375rem; overflow: hidden; color: var(--color-text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
