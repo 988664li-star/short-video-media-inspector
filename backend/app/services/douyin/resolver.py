@@ -223,6 +223,7 @@ async def resolve_share_text(
         for item in video.get("bit_rate") or []
     ]
     payload = {
+        "platform": "douyin",
         "access_mode": "login_cookie" if active_cookie else "visitor",
         "aweme_id": str(detail.get("aweme_id") or aweme_id),
         "share_url": valid_url,

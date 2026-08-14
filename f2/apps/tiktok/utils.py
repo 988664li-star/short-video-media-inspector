@@ -1116,8 +1116,8 @@ class DeviceIdManager(BaseCrawler):
 
     try:
         _MSTOKEN = TokenManager.gen_real_msToken()
-    except Exception as e:
-        _MSTOKEN = TokenManager.gen_real_msToken()
+    except Exception:
+        _MSTOKEN = TokenManager.gen_false_msToken()
 
     _DEVICE_ID_HEADERS = {
         "User-Agent": ClientConfManager.user_agent(),

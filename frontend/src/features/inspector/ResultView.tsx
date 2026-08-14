@@ -9,6 +9,7 @@ interface ResultViewProps {
   data: InspectorData;
   onOpenUser: (user: UserSummary) => void;
   onInspect: (item: AwemeSummary) => Promise<boolean>;
+  onExtractTranscription: () => void;
   transcription: {
     data: TranscriptionData | null;
     loading: boolean;
@@ -16,7 +17,7 @@ interface ResultViewProps {
   };
 }
 
-export function ResultView({ data, onOpenUser, onInspect, transcription }: ResultViewProps) {
+export function ResultView({ data, onOpenUser, onInspect, onExtractTranscription, transcription }: ResultViewProps) {
   return (
     <div id="result">
       <div className="result-layout">
@@ -28,6 +29,7 @@ export function ResultView({ data, onOpenUser, onInspect, transcription }: Resul
         transcription={transcription.data}
         loading={transcription.loading}
         error={transcription.error}
+        onExtract={onExtractTranscription}
       />
       <ResultTabs key={data.aweme_id} data={data} onOpenUser={onOpenUser} onInspect={onInspect} />
     </div>

@@ -16,6 +16,8 @@ import type {
   UserPostsPage,
 } from "../types/douyin";
 
+export type ContentPlatform = "auto" | "douyin" | "tiktok";
+
 
 export const getSessionStatus = () => apiRequest<SessionStatus>(
   "/api/session/status",
@@ -35,12 +37,13 @@ export const clearSessionCookie = () => apiRequest<SessionStatus>(
   "Cookie 清除失败",
 );
 
-export const resolveAweme = (shareText: string, awemeId?: string) => apiRequest<InspectorData>(
+export const resolveAweme = (shareText: string, awemeId?: string, platform: ContentPlatform = "auto") => apiRequest<InspectorData>(
   "/api/resolve",
   {
     method: "POST",
     body: JSON.stringify({
       share_text: shareText,
+      platform,
       ...(awemeId ? { aweme_id: awemeId } : {}),
     }),
   },

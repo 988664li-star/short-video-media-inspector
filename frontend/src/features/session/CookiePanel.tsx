@@ -33,8 +33,8 @@ export function CookiePanel({
     <details className="cookie-panel">
       <summary>
         <span className="cookie-panel__summary">
-          <strong>登录 Cookie（可选）</strong>
-          <small>用于更稳定地访问当前账号有权查看的数据</small>
+          <strong>抖音登录 Cookie（可选）</strong>
+          <small>仅用于更稳定地访问当前账号有权查看的抖音数据</small>
         </span>
         <span className={`status-chip ${status.configured ? "status-chip--active" : ""}`}>
           {status.configured ? `Cookie 已载入 · ${status.cookie_count} 项` : "游客模式"}
@@ -48,7 +48,7 @@ export function CookiePanel({
             <li>刷新页面，选择一个发往 <code>www.douyin.com</code> 的请求。</li>
             <li>在 Request Headers 找到 <code>Cookie</code>，复制冒号后的完整值。</li>
           </ol>
-          <p>不要只复制 sessionid，也不要粘贴 Set-Cookie、cURL 或其他请求头。</p>
+          <p>TikTok 公共作品无需在此填入 Cookie；不要只复制 sessionid，也不要粘贴 Set-Cookie、cURL 或其他请求头。</p>
         </div>
         <label className="field-label" htmlFor="cookieInput">完整 Cookie 值</label>
         <textarea

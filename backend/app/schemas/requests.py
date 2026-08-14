@@ -10,6 +10,7 @@ class StrictRequest(BaseModel):
 class ResolveRequest(StrictRequest):
     share_text: str = Field(min_length=1, max_length=32_768)
     aweme_id: str | None = Field(default=None, max_length=30)
+    platform: Literal["auto", "douyin", "tiktok"] = "auto"
 
 
 class TranscriptionRequest(StrictRequest):

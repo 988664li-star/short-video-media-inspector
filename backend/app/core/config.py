@@ -25,6 +25,8 @@ class Settings:
     transcription_device: str = os.environ.get("WHISPER_DEVICE", "cpu")
     transcription_compute_type: str = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
     transcription_cpu_threads: int = int(os.environ.get("WHISPER_CPU_THREADS", "8"))
+    punctuation_model: str = os.environ.get("PUNCTUATION_MODEL", "ct-punc")
+    punctuation_device: str = os.environ.get("PUNCTUATION_DEVICE", "cpu")
     transcription_max_media_bytes: int = int(
         os.environ.get("WHISPER_MAX_MEDIA_BYTES", str(100 * 1024 * 1024))
     )

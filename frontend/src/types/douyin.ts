@@ -20,6 +20,7 @@ export interface TranscriptionData {
   language_probability: number;
   duration_seconds: number;
   model: string;
+  punctuation_model?: string;
   device: string;
   compute_type: string;
   source_kind: "audio" | "video";
@@ -136,6 +137,7 @@ export interface VideoTechnical {
 }
 
 export interface InspectorData {
+  platform: "douyin" | "tiktok";
   access_mode: "visitor" | "login_cookie";
   aweme_id: string;
   share_url: string;

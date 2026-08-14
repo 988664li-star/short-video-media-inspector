@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import { resolveAweme } from "../api/douyin";
+import type { ContentPlatform } from "../api/douyin";
 import type { InspectorData } from "../types/douyin";
 import { useTranscription } from "./useTranscription";
 
@@ -15,6 +16,7 @@ export interface ResolveOptions {
 
 export function useInspector() {
   const [shareText, setShareText] = useState(DEFAULT_SHARE_TEXT);
+  const [platform, setPlatform] = useState<ContentPlatform>("auto");
   const [data, setData] = useState<InspectorData | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -34,9 +36,9 @@ export function useInspector() {
       : "正在获取作品详情、评论、相关推荐和作者作品…");
     setMessageTone("default");
     try {
-      const result = await resolveAweme(requestedText, options.awemeId);
+      const result = await resolveAweme(requestedText, options.awemeId, options.awemeId ? "douyin" : platform);
       setData(result);
-      transcription.start(result);
+      transcription.clear();
       setShareText(requestedText);
       const warning = result.warnings?.[0];
       setMessage(warning || `解析成功 · 作品 ${result.aweme_id} · ${result.access_mode === "login_cookie" ? "登录 Cookie 模式" : "游客模式"}`);
@@ -66,14 +68,23 @@ export function useInspector() {
     clear();
   }, [clear]);
 
+  const extractTranscription = useCallback(() => {
+    if (data) {
+      transcription.start(data);
+    }
+  }, [data, transcription.start]);
+
   return {
     shareText,
     setShareText,
+    platform,
+    setPlatform,
     data,
     loading,
     message,
     messageTone,
     resolve,
+    extractTranscription,
     clear,
     resetInput,
     transcription: {

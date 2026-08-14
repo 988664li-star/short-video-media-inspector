@@ -37,7 +37,7 @@ export function MediaDetails({ data, onOpenUser }: MediaDetailsProps) {
         />
         <div>
           <h2>{data.author.nickname}</h2>
-          {data.author.unique_id ? <span className="author-handle">抖音号 {data.author.unique_id}</span> : null}
+          {data.author.unique_id ? <span className="author-handle">{data.platform === "tiktok" ? "TikTok" : "抖音号"} {data.author.unique_id}</span> : null}
           <p>{data.description}</p>
           <div className="topic-list">
             {data.hashtags?.map((topic) => <span key={topic.id || topic.name}>#{topic.name}</span>)}

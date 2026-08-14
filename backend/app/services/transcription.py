@@ -32,6 +32,10 @@ class ModelUnavailableError(TranscriptionError):
     """The local speech recognition model could not be loaded."""
 
 
+class PunctuationModelUnavailableError(ModelUnavailableError):
+    """The local punctuation restoration model could not be loaded."""
+
+
 @dataclass(frozen=True)
 class TranscriptionConfig:
     model_size: str
@@ -39,6 +43,8 @@ class TranscriptionConfig:
     device: str
     compute_type: str
     cpu_threads: int
+    punctuation_model: str
+    punctuation_device: str
     max_media_bytes: int
     model_path: Path
     cache_path: Path
@@ -50,6 +56,7 @@ class TranscriptionService:
     def __init__(self, config: TranscriptionConfig) -> None:
         self.config = config
         self._model: Any | None = None
+        self._punctuation_model: Any | None = None
         self._runtime_device = config.device
         self._runtime_compute_type = config.compute_type
         self._job_lock = asyncio.Lock()
@@ -63,6 +70,8 @@ class TranscriptionService:
                 device=settings.transcription_device,
                 compute_type=settings.transcription_compute_type,
                 cpu_threads=settings.transcription_cpu_threads,
+                punctuation_model=settings.punctuation_model,
+                punctuation_device=settings.punctuation_device,
                 max_media_bytes=settings.transcription_max_media_bytes,
                 model_path=settings.transcription_model_path,
                 cache_path=settings.transcription_cache_path,
@@ -101,12 +110,14 @@ class TranscriptionService:
                 "language_probability": result["language_probability"],
                 "duration_seconds": result["duration_seconds"],
                 "model": self.config.model_size,
+                "punctuation_model": self.config.punctuation_model,
                 "device": self._runtime_device,
                 "compute_type": self._runtime_compute_type,
                 "source_kind": resource.kind,
                 "cached": False,
                 "elapsed_seconds": round(time.perf_counter() - started_at, 2),
             }
+            payload = await asyncio.to_thread(self._restore_payload_punctuation, payload)
             await asyncio.to_thread(self._write_cache, cache_key, payload)
             return payload
 
@@ -221,6 +232,31 @@ class TranscriptionService:
                 self._runtime_compute_type = "int8"
         return self._model
 
+    def _get_punctuation_model(self) -> Any:
+        if self._punctuation_model is not None:
+            return self._punctuation_model
+
+        try:
+            from funasr import AutoModel
+        except ImportError as exc:
+            raise PunctuationModelUnavailableError(
+                "缺少中文标点模型依赖，请重新安装 backend/requirements.txt"
+            ) from exc
+
+        try:
+            self._punctuation_model = AutoModel(
+                model=self.config.punctuation_model,
+                device=self.config.punctuation_device,
+                ncpu=self.config.cpu_threads,
+                disable_update=True,
+                disable_pbar=True,
+            )
+        except Exception as exc:
+            raise PunctuationModelUnavailableError(
+                f"中文标点模型加载失败：{exc}"
+            ) from exc
+        return self._punctuation_model
+
     def _create_model(self, device: str, compute_type: str) -> Any:
         try:
             from faster_whisper import WhisperModel
@@ -241,8 +277,59 @@ class TranscriptionService:
     def _normalize_text(self, text: str) -> str:
         punctuation = {"﹑": "，", "､": "，"}
         if self.config.language == "zh":
-            punctuation[","] = "，"
+            punctuation.update(
+                {
+                    ",": "，",
+                    ".": "。",
+                    "!": "！",
+                    "?": "？",
+                    ";": "；",
+                    ":": "：",
+                }
+            )
         return text.strip().translate(str.maketrans(punctuation))
+
+    def _restore_payload_punctuation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Restore punctuation with a trained model, never with text rules."""
+        if self.config.language != "zh":
+            return payload
+
+        model = self._get_punctuation_model()
+        segments = payload.get("segments")
+        if not isinstance(segments, list):
+            segments = []
+
+        restored_segments: list[dict[str, Any]] = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            text = str(segment.get("text", "")).strip()
+            if text:
+                segment = {**segment, "text": self._restore_punctuation(model, text)}
+            restored_segments.append(segment)
+
+        payload["segments"] = restored_segments
+        if restored_segments:
+            payload["text"] = "".join(
+                str(segment.get("text", "")) for segment in restored_segments
+            )
+        elif payload.get("text"):
+            payload["text"] = self._restore_punctuation(model, str(payload["text"]))
+        payload["punctuation_model"] = self.config.punctuation_model
+        return payload
+
+    def _restore_punctuation(self, model: Any, text: str) -> str:
+        try:
+            result = model.generate(input=text)
+            restored = result[0].get("text") if result else None
+        except Exception as exc:
+            raise PunctuationModelUnavailableError(
+                f"中文标点恢复失败：{exc}"
+            ) from exc
+
+        if not isinstance(restored, str) or not restored.strip():
+            raise PunctuationModelUnavailableError("中文标点模型没有返回有效结果")
+        return self._normalize_text(restored)
 
     def _cache_key(self, aweme_id: str) -> str:
         value = "|".join(
@@ -250,6 +337,7 @@ class TranscriptionService:
                 aweme_id,
                 self.config.model_size,
                 self.config.language,
+                self.config.punctuation_model,
             )
         )
         return hashlib.sha256(value.encode("utf-8")).hexdigest()

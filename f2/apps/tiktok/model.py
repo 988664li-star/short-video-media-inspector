@@ -61,8 +61,7 @@ class BaseRequestModel(BaseModel):
     except Exception:
         logger.warning(_("msToken 生成失败，使用虚假 msToken"))
         logger.debug(traceback.format_exc())
-        # 发生异常时，重新生成msToken，不生成虚假msToken
-        msToken: str = TokenManager.gen_real_msToken()
+        msToken: str = TokenManager.gen_false_msToken()
 
 
 class BaseWebCastModel(BaseModel):
@@ -193,9 +192,8 @@ class LiveImFetch(BaseWebCastModel):
     history_comment_cursor: str = "7386962392254958354"
     try:
         msToken: str = TokenManager.gen_real_msToken()
-    except Exception as e:
-        # 发生异常时，重新生成msToken，不生成虚假msToken
-        msToken: str = TokenManager.gen_real_msToken()
+    except Exception:
+        msToken: str = TokenManager.gen_false_msToken()
     _signature: str
 
 

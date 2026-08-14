@@ -44,10 +44,12 @@ export function App() {
             <>
               <InputPanel
                 shareText={inspector.shareText}
+                platform={inspector.platform}
                 loading={inspector.loading}
                 message={inspector.message}
                 messageTone={inspector.messageTone}
                 onShareTextChange={inspector.setShareText}
+                onPlatformChange={inspector.setPlatform}
                 onResolve={() => void inspector.resolve()}
                 onReset={() => {
                   drawer.close();
@@ -60,6 +62,7 @@ export function App() {
                   data={inspector.data}
                   onOpenUser={(user) => void drawer.open(user)}
                   onInspect={inspectAweme}
+                  onExtractTranscription={inspector.extractTranscription}
                   transcription={inspector.transcription}
                 />
               ) : (

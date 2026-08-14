@@ -9,6 +9,7 @@ interface TranscriptPanelProps {
   transcription: TranscriptionData | null;
   loading: boolean;
   error: string;
+  onExtract: () => void;
 }
 
 const formatTimestamp = (seconds: number) => {
@@ -17,7 +18,7 @@ const formatTimestamp = (seconds: number) => {
   return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
 };
 
-export function TranscriptPanel({ transcription, loading, error }: TranscriptPanelProps) {
+export function TranscriptPanel({ transcription, loading, error, onExtract }: TranscriptPanelProps) {
   const [copied, setCopied] = useState(false);
 
   const copyTranscript = async () => {
@@ -38,7 +39,12 @@ export function TranscriptPanel({ transcription, loading, error }: TranscriptPan
             {copied ? <Check /> : <Copy />}
             {copied ? "已复制" : "复制文案"}
           </button>
-        ) : null}
+        ) : (
+          <button className="button button--primary transcript-extract" type="button" onClick={onExtract} disabled={loading}>
+            {loading ? <LoaderCircle className="transcript-spinner" /> : <FileText />}
+            {loading ? "正在提取" : error ? "重新提取文案" : "提取文案"}
+          </button>
+        )}
       </header>
 
       {loading ? (
@@ -46,7 +52,7 @@ export function TranscriptPanel({ transcription, loading, error }: TranscriptPan
           <LoaderCircle className="transcript-spinner" />
           <div>
             <strong>正在从音轨生成文案</strong>
-            <p>首次使用会下载 small 模型，后续作品会直接复用。</p>
+            <p>首次使用会下载 small 转写模型和中文标点模型，后续作品会直接复用。</p>
           </div>
         </div>
       ) : error ? (
@@ -61,6 +67,7 @@ export function TranscriptPanel({ transcription, loading, error }: TranscriptPan
         <>
           <div className="transcript-meta">
             <span>{transcription.model}</span>
+            {transcription.punctuation_model ? <span>{transcription.punctuation_model}</span> : null}
             <span>{transcription.device.toUpperCase()} · {transcription.compute_type}</span>
             <span>{formatTimestamp(transcription.duration_seconds)}</span>
             <span>{transcription.source_kind === "audio" ? "独立音轨" : "视频音轨"}</span>
@@ -81,7 +88,15 @@ export function TranscriptPanel({ transcription, loading, error }: TranscriptPan
             </details>
           ) : null}
         </>
-      ) : null}
+      ) : (
+        <div className="transcript-status">
+          <FileText />
+          <div>
+            <strong>按需生成视频文案</strong>
+            <p>点击“提取文案”后才会加载模型并使用显卡或 CPU 进行识别。</p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
