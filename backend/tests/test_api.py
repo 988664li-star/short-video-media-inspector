@@ -4,6 +4,7 @@ import pytest
 from backend.app.dependencies import (
     get_cookie_store,
     get_media_registry,
+    get_shot_detection_service,
     get_transcription_service,
 )
 from backend.app.main import app
@@ -151,3 +152,62 @@ async def test_transcription_rejects_unregistered_media(client: httpx.AsyncClien
     )
 
     assert response.status_code == 410
+
+
+@pytest.mark.asyncio
+async def test_shot_detection_only_uses_registered_video(client: httpx.AsyncClient):
+    class StubShotDetectionService:
+        async def detect(self, aweme_id, resource):
+            assert aweme_id == "1234567890123456789"
+            assert resource.kind == "video"
+            return {"aweme_id": aweme_id, "shots": [], "cached": False}
+
+    media_registry = app.dependency_overrides[get_media_registry]()
+    session_id = media_registry.add(
+        [
+            MediaResource(
+                source_url="https://cdn.example/video.mp4",
+                headers={"User-Agent": "test"},
+                kind="video",
+            )
+        ]
+    )
+    app.dependency_overrides[get_shot_detection_service] = (
+        lambda: StubShotDetectionService()
+    )
+
+    response = await client.post(
+        "/api/shot-detection",
+        json={
+            "aweme_id": "1234567890123456789",
+            "media_url": f"/api/media/{session_id}/0",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["shots"] == []
+
+
+@pytest.mark.asyncio
+async def test_shot_detection_rejects_non_video_media(client: httpx.AsyncClient):
+    media_registry = app.dependency_overrides[get_media_registry]()
+    session_id = media_registry.add(
+        [
+            MediaResource(
+                source_url="https://cdn.example/audio.m4a",
+                headers={"User-Agent": "test"},
+                kind="audio",
+            )
+        ]
+    )
+
+    response = await client.post(
+        "/api/shot-detection",
+        json={
+            "aweme_id": "1234567890123456789",
+            "media_url": f"/api/media/{session_id}/0",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "不是视频" in response.json()["detail"]

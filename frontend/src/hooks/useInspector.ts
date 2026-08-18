@@ -94,3 +94,5 @@ export function useInspector() {
     },
   };
 }
+
+export type InspectorController = ReturnType<typeof useInspector>;

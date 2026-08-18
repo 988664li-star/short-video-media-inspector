@@ -48,6 +48,7 @@ class TranscriptionConfig:
     max_media_bytes: int
     model_path: Path
     cache_path: Path
+    cache_ttl_seconds: int
 
 
 class TranscriptionService:
@@ -75,6 +76,7 @@ class TranscriptionService:
                 max_media_bytes=settings.transcription_max_media_bytes,
                 model_path=settings.transcription_model_path,
                 cache_path=settings.transcription_cache_path,
+                cache_ttl_seconds=settings.transcription_cache_ttl_seconds,
             )
         )
 
@@ -86,6 +88,7 @@ class TranscriptionService:
     ) -> dict[str, Any]:
         cache_key = self._cache_key(aweme_id)
         async with self._job_lock:
+            await asyncio.to_thread(self.cleanup_expired_cache)
             cached = await asyncio.to_thread(self._read_cache, cache_key)
             if cached is not None:
                 cached["cached"] = True
@@ -116,10 +119,40 @@ class TranscriptionService:
                 "source_kind": resource.kind,
                 "cached": False,
                 "elapsed_seconds": round(time.perf_counter() - started_at, 2),
+                "cache_ttl_seconds": self.config.cache_ttl_seconds,
             }
             payload = await asyncio.to_thread(self._restore_payload_punctuation, payload)
             await asyncio.to_thread(self._write_cache, cache_key, payload)
             return payload
+
+    async def transcribe_local_file(
+        self,
+        aweme_id: str,
+        media_path: Path,
+        context: str = "",
+    ) -> dict[str, Any]:
+        """Transcribe an already downloaded source video without another network download."""
+        if not media_path.is_file() or media_path.stat().st_size == 0:
+            raise MediaDownloadError("分镜源视频不存在，无法生成口播")
+        async with self._job_lock:
+            started_at = time.perf_counter()
+            result = await asyncio.to_thread(self._transcribe_file, media_path, context)
+            payload = {
+                "aweme_id": aweme_id,
+                "text": result["text"],
+                "segments": result["segments"],
+                "language": result["language"],
+                "language_probability": result["language_probability"],
+                "duration_seconds": result["duration_seconds"],
+                "model": self.config.model_size,
+                "punctuation_model": self.config.punctuation_model,
+                "device": self._runtime_device,
+                "compute_type": self._runtime_compute_type,
+                "source_kind": "video",
+                "cached": False,
+                "elapsed_seconds": round(time.perf_counter() - started_at, 2),
+            }
+            return await asyncio.to_thread(self._restore_payload_punctuation, payload)
 
     async def _download_media(
         self,
@@ -345,6 +378,9 @@ class TranscriptionService:
     def _read_cache(self, cache_key: str) -> dict[str, Any] | None:
         path = self.config.cache_path / f"{cache_key}.json"
         try:
+            if self._is_cache_expired(path):
+                path.unlink()
+                return None
             payload = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict) or not payload.get("text"):
                 return None
@@ -355,6 +391,44 @@ class TranscriptionService:
             return payload
         except (FileNotFoundError, OSError, json.JSONDecodeError):
             return None
+
+    def cleanup_expired_cache(self) -> int:
+        """Delete expired transcript files; model weights are stored elsewhere."""
+        try:
+            paths = list(self.config.cache_path.glob("*.json"))
+        except OSError:
+            return 0
+
+        removed = 0
+        for path in paths:
+            try:
+                if self._is_cache_expired(path):
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def clear_cache(self) -> int:
+        """Remove every temporary transcript at application shutdown."""
+        try:
+            paths = list(self.config.cache_path.glob("*.json"))
+        except OSError:
+            return 0
+
+        removed = 0
+        for path in paths:
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def _is_cache_expired(self, path: Path) -> bool:
+        if self.config.cache_ttl_seconds <= 0:
+            return True
+        return path.stat().st_mtime < time.time() - self.config.cache_ttl_seconds
 
     def _write_cache(self, cache_key: str, payload: dict[str, Any]) -> None:
         self.config.cache_path.mkdir(parents=True, exist_ok=True, mode=0o700)

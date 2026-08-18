@@ -1,8 +1,46 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.router import api_router
 from backend.app.core.config import settings
+from backend.app.dependencies import (
+    cookie_store,
+    media_registry,
+    shot_detection_service,
+    transcription_service,
+)
+from backend.app.services.session import remove_cookie_file
+
+
+async def _privacy_cleanup_loop() -> None:
+    interval = max(10, settings.privacy_cleanup_interval_seconds)
+    while True:
+        await asyncio.sleep(interval)
+        await asyncio.to_thread(transcription_service.cleanup_expired_cache)
+        await asyncio.to_thread(shot_detection_service.cleanup_expired_cache)
+        media_registry.prune()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Remove data left behind by older versions before serving any request.
+    await asyncio.to_thread(remove_cookie_file, settings.cookie_store_path)
+    await asyncio.to_thread(transcription_service.clear_cache)
+    cleanup_task = asyncio.create_task(_privacy_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+        media_registry.clear()
+        cookie_store.clear()
+        await asyncio.to_thread(transcription_service.clear_cache)
 
 
 def create_app() -> FastAPI:
@@ -12,6 +50,7 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url="/api/redoc",
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
     application.add_middleware(
         CORSMiddleware,

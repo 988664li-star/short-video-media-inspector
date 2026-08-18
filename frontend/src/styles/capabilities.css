@@ -1,6 +1,6 @@
 .workspace-nav { display: flex; gap: var(--space-1); margin: 0 0 var(--space-3); padding: 0 var(--space-2); border-bottom: 1px solid var(--color-border-soft); }
-.workspace-nav button { min-height: 2.75rem; padding: 0 var(--space-4); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--color-text-muted); font-size: var(--text-base); font-weight: var(--weight-semibold); cursor: pointer; }
-.workspace-nav button:hover { color: var(--color-text); }
+.workspace-nav a { min-height: 2.75rem; display: inline-flex; align-items: center; padding: 0 var(--space-4); border-bottom: 2px solid transparent; color: var(--color-text-muted); font-size: var(--text-base); font-weight: var(--weight-semibold); text-decoration: none; }
+.workspace-nav a:hover { color: var(--color-text); }
 .workspace-nav__active { border-bottom-color: var(--color-accent) !important; color: var(--color-text) !important; }
 .workspace-nav span { margin-left: var(--space-1); color: var(--color-accent-text); font: var(--text-2xs) var(--font-mono); }
 

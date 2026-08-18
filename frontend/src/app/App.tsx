@@ -1,20 +1,19 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
 import { AppHeader } from "../components/layout/AppHeader";
-import { PanelState } from "../components/ui/PanelState";
+import { WorkspaceNavigation } from "../components/layout/WorkspaceNavigation";
 import { useInspector } from "../hooks/useInspector";
 import { useSession } from "../hooks/useSession";
 import { useUserDrawer } from "../hooks/useUserDrawer";
+import { useWorkspaceRoute } from "../hooks/useWorkspaceRoute";
 import type { AwemeSummary } from "../types/douyin";
-import { InputPanel } from "../features/inspector/InputPanel";
-import { ResultView } from "../features/inspector/ResultView";
 import { UserDrawer } from "../features/user/UserDrawer";
-import { CapabilityCenter } from "../features/capabilities/CapabilityCenter";
-import { CAPABILITIES } from "../features/capabilities/catalog";
-
+import { CapabilitiesPage } from "../pages/CapabilitiesPage";
+import { InspectorPage } from "../pages/InspectorPage";
+import { ReplicationPage } from "../pages/ReplicationPage";
 
 export function App() {
-  const [activeView, setActiveView] = useState<"inspector" | "capabilities">("inspector");
+  const { page, navigate } = useWorkspaceRoute();
   const inspector = useInspector();
   const drawer = useUserDrawer();
   const handleSessionCleared = useCallback(() => {
@@ -23,60 +22,36 @@ export function App() {
   }, [drawer.close, inspector.clear]);
   const session = useSession(handleSessionCleared);
   const inspectAweme = useCallback((item: AwemeSummary) => {
-    setActiveView("inspector");
+    navigate("inspector");
     return inspector.resolve({
       shareText: item.douyin_url,
       awemeId: item.aweme_id,
       scrollToResult: true,
     });
-  }, [inspector.resolve]);
+  }, [inspector.resolve, navigate]);
+  const resetInspector = useCallback(() => {
+    drawer.close();
+    inspector.resetInput();
+  }, [drawer.close, inspector.resetInput]);
 
   return (
     <>
       <div className="app-shell">
         <AppHeader />
-        <nav className="workspace-nav" aria-label="工作区">
-          <button type="button" className={activeView === "inspector" ? "workspace-nav__active" : ""} onClick={() => setActiveView("inspector")}>作品解析</button>
-          <button type="button" className={activeView === "capabilities" ? "workspace-nav__active" : ""} onClick={() => setActiveView("capabilities")}>能力中心 <span>{CAPABILITIES.length}</span></button>
-        </nav>
+        <WorkspaceNavigation activePage={page} onNavigate={navigate} />
         <main>
-          {activeView === "inspector" ? (
-            <>
-              <InputPanel
-                shareText={inspector.shareText}
-                platform={inspector.platform}
-                loading={inspector.loading}
-                message={inspector.message}
-                messageTone={inspector.messageTone}
-                onShareTextChange={inspector.setShareText}
-                onPlatformChange={inspector.setPlatform}
-                onResolve={() => void inspector.resolve()}
-                onReset={() => {
-                  drawer.close();
-                  inspector.resetInput();
-                }}
-                session={session}
-              />
-              {inspector.data ? (
-                <ResultView
-                  data={inspector.data}
-                  onOpenUser={(user) => void drawer.open(user)}
-                  onInspect={inspectAweme}
-                  onExtractTranscription={inspector.extractTranscription}
-                  transcription={inspector.transcription}
-                />
-              ) : (
-                <section className="panel empty-state">
-                  <PanelState
-                    type={inspector.loading ? "loading" : "empty"}
-                    title={inspector.loading ? "正在解析媒体" : "等待解析媒体"}
-                    description={inspector.loading ? "正在请求抖音公开数据，请稍候。" : "粘贴抖音分享文案或链接，音频、视频和图片会显示在这里。"}
-                  />
-                </section>
-              )}
-            </>
+          {page === "inspector" ? (
+            <InspectorPage
+              inspector={inspector}
+              session={session}
+              onInspect={inspectAweme}
+              onOpenUser={(user) => void drawer.open(user)}
+              onReset={resetInspector}
+            />
+          ) : page === "capabilities" ? (
+            <CapabilitiesPage session={session} onInspect={inspectAweme} onOpenUser={(user) => void drawer.open(user)} />
           ) : (
-            <CapabilityCenter session={session} onInspect={inspectAweme} onOpenUser={(user) => void drawer.open(user)} />
+            <ReplicationPage inspector={inspector} onReset={resetInspector} />
           )}
         </main>
       </div>

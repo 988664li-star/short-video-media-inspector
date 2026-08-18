@@ -19,6 +19,14 @@ LOGIN_COOKIE_NAMES = {
 }
 
 
+def remove_cookie_file(storage_path: Path) -> None:
+    """Delete a legacy on-disk cookie when privacy-first mode starts."""
+    try:
+        storage_path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise RuntimeError("旧 Cookie 文件删除失败，请检查后端数据目录权限") from exc
+
+
 def normalize_login_cookie(value: Any) -> tuple[str, list[str]]:
     """Validate a copied Request Headers Cookie value."""
     cookie = str(value or "").strip()

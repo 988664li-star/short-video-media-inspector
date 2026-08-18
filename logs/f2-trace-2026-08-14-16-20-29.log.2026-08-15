@@ -1,0 +1,10 @@
+2026-08-15 20:06:42,481 - f2-trace - ERROR - Traceback (most recent call last):
+  File "/home/li/f2/f2/crawlers/base_crawler.py", line 201, in _fetch_get_json
+    response = await self.get_fetch_data(endpoint)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/li/f2/f2/crawlers/base_crawler.py", line 283, in get_fetch_data
+    raise APIRetryExhaustedError(
+    ...<6 lines>...
+    )
+f2.exceptions.api_exceptions.APIRetryExhaustedError: 获取端点数据失败，重试次数达到上限。代理：{'http://': '', 'https://': ''}，异常类名：DouyinCrawler
+

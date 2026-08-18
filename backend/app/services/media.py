@@ -50,13 +50,18 @@ class MediaRegistry:
         with self._lock:
             self._resources.clear()
 
-    def _prune_locked(self) -> None:
+    def prune(self) -> int:
+        with self._lock:
+            return self._prune_locked()
+
+    def _prune_locked(self) -> int:
         cutoff = time.monotonic() - settings.media_session_ttl_seconds
         expired = [
             key for key, (created, _) in self._resources.items() if created < cutoff
         ]
         for key in expired:
             self._resources.pop(key, None)
+        return len(expired)
 
 
 CONTENT_TYPE_FALLBACKS = {
@@ -111,7 +116,7 @@ async def create_media_response(
         for header in FORWARDED_RESPONSE_HEADERS
         if (value := response.headers.get(header))
     }
-    response_headers["Cache-Control"] = "private, max-age=300"
+    response_headers["Cache-Control"] = "no-store"
     return StreamingResponse(
         chunks(),
         status_code=response.status_code,

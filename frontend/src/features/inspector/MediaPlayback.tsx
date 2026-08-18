@@ -1,6 +1,7 @@
 import { Download } from "lucide-react";
 
 import type { InspectorData } from "../../types/douyin";
+import { VideoStage } from "./VideoStage";
 
 
 interface MediaPlaybackProps {
@@ -10,19 +11,7 @@ interface MediaPlaybackProps {
 export function MediaPlayback({ data }: MediaPlaybackProps) {
   return (
     <section className="panel playback-panel" aria-label="媒体播放">
-      <div className="video-stage">
-        {data.video ? (
-          <video
-            controls
-            playsInline
-            preload="metadata"
-            src={data.video.proxy_url}
-            poster={data.images[0]?.proxy_url}
-          />
-        ) : (
-          <p className="media-unavailable">这条作品没有可播放的视频地址</p>
-        )}
-      </div>
+      <VideoStage data={data} />
       <div className="audio-section">
         <div className="subsection-title">
           <h3>视频原音</h3>

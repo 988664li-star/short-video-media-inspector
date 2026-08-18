@@ -59,7 +59,7 @@ export function useSession(onCleared: () => void) {
       sessionStatusRequest = Promise.resolve(nextStatus);
       setStatus(nextStatus);
       setRevision((value) => value + 1);
-      setMessage(nextStatus.message || "Cookie 已保存，后端重启后仍会自动载入");
+      setMessage(nextStatus.message || "Cookie 已载入，仅在当前服务运行期间有效");
       setTone(nextStatus.has_login_markers ? "success" : "default");
       return true;
     } catch (error) {
@@ -91,3 +91,5 @@ export function useSession(onCleared: () => void) {
 
   return { status, revision, busy, message, tone, save, clear };
 }
+
+export type SessionController = ReturnType<typeof useSession>;

@@ -1,0 +1,48 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - heading "短视频媒体检查台" [level=1] [ref=e9]
+      - generic [ref=e10]: 本地 F2 · 抖音 / TikTok
+    - generic [ref=e11]: 服务就绪
+  - navigation "工作区" [ref=e13]:
+    - link "作品解析" [ref=e14] [cursor=pointer]:
+      - /url: /
+    - link "能力中心 23" [ref=e15] [cursor=pointer]:
+      - /url: /capabilities
+      - text: 能力中心
+      - generic [ref=e16]: "23"
+    - link "爆款复刻" [ref=e17] [cursor=pointer]:
+      - /url: /replication
+  - main [ref=e18]:
+    - region [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - heading "爆款复刻" [level=2] [ref=e23]
+          - paragraph [ref=e24]: 粘贴参考作品的分享文案或链接，直接提取视频，用于后续复刻拆解。
+        - generic [ref=e25]:
+          - generic [ref=e26]:
+            - generic [ref=e27]: 平台
+            - combobox "解析平台" [ref=e28]:
+              - option "自动识别" [selected]
+              - option "抖音"
+              - option "TikTok"
+          - button "清空" [ref=e29] [cursor=pointer]
+        - generic [ref=e30]:
+          - textbox "参考作品分享文案或链接" [ref=e31]:
+            - /placeholder: 粘贴抖音或 TikTok 分享文案、作品链接
+            - text: "2.56 eBG:/ J@V.lP :0pm 03/23 6月29日素材突出展示 有粉丝问，口播里有素材需要突出展示，需要怎么排版？素材怎么高亮显示？今天一个视频讲清楚。# 视频剪辑# 素材 # 口播 # 剪辑教程 https://v.douyin.com/ABsTdyaUZLA/ 复制此链接，打开Dou音搜索，直接观看视频！"
+          - button "解析并提取视频" [ref=e32] [cursor=pointer]
+        - status [ref=e38]
+      - generic "爆款复刻工作流" [ref=e39]:
+        - article [ref=e40]:
+          - generic [ref=e41]: "01"
+          - heading "解析原作品" [level=3] [ref=e47]
+          - paragraph [ref=e48]: 导入参考作品，提取标题、文案、媒体与互动信息。
+        - article [ref=e49]:
+          - generic [ref=e50]: "02"
+          - heading "拆解爆点" [level=3] [ref=e53]
+          - paragraph [ref=e54]: 围绕选题、开场钩子、节奏与互动信号建立复刻依据。
+        - article [ref=e55]:
+          - generic [ref=e56]: "03"
+          - heading "组织新方案" [level=3] [ref=e59]
+          - paragraph [ref=e60]: 保留有效结构，换成自己的表达、素材与创作角度。

@@ -1,0 +1,22 @@
+2026-08-14 21:40:29,258 - f2-trace - ERROR - Traceback (most recent call last):
+  File "/home/li/f2/f2/crawlers/base_crawler.py", line 296, in get_fetch_data
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/li/f2/.venv/lib/python3.13/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '403 Forbidden' for url 'https://www.douyin.com/aweme/v1/web/aweme/post/?device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&publish_video_strategy_type=2&pc_libra_divert=Windows&version_code=290100&version_name=29.1.0&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Edge&browser_version=130.0.0.0&browser_online=true&engine_name=Blink&engine_version=130.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=100&msToken=CzOYk9ExfXsltgm0VzhMqwaYwvsTo2XmYQwy7BcaESCkcSp8EP0QoFmRxIwcHKSylbRVrDrLnK4yGRzLAuOvE1jmIY7m8gcVG5gWf8nGjb3WqiNr3zFjdvWbjTbHO3paKAMkMl1UAkrZVjV69sY2kP6Ds6N_FKbyls0X8MxV_NUdJ_mHegZmFzI=&max_cursor=0&count=9&sec_user_id=MS4wLjABAAAAQrsHaDDBroD5YSOcGr9C5xilXu82Vra4NVFsN49m-KlWObednJ-jRTcFBuLmeKhI&a_bogus=m6R0/DuIpn9NXE6Y5RVLfY3q6433YQNr0SVkMD2fUVfPvy39HMYx9exowtzvNcfjFs/jIeLjy4hbY3KprQCJ8HwfHW0q/2CZmgh0t-Ph5xSSs1feeLSQJ4JL4vE3SFFMRXNIEQjkqw5cFuRmAoHe-wHvPjojx2f39gGB'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/li/f2/f2/crawlers/base_crawler.py", line 201, in _fetch_get_json
+    response = await self.get_fetch_data(endpoint)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/li/f2/f2/crawlers/base_crawler.py", line 353, in get_fetch_data
+    self.handle_http_status_error(exc, url, attempt + 1)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/li/f2/f2/crawlers/base_crawler.py", line 520, in handle_http_status_error
+    raise APIResponseError(_("未知HTTP状态码错误：{0}").format(status_code))
+f2.exceptions.api_exceptions.APIResponseError: 未知HTTP状态码错误：403
+

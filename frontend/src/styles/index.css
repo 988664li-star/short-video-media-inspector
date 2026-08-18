@@ -8,4 +8,7 @@
 @import "./transcription.css";
 @import "./drawer.css";
 @import "./capabilities.css";
+@import "./replication.css";
+@import "./shot-detection.css";
+@import "./replica-analysis.css";
 @import "./responsive.css";

@@ -72,7 +72,7 @@ export function CookiePanel({
         </div>
         <div className={`inline-message inline-message--${tone}`} role="status">{message}</div>
         <p className="privacy-note">
-          Cookie 保存在本机后端私有文件中，后端重启后自动恢复；文件仅允许当前系统用户读写，且不会通过接口回显、写入日志或解析结果。点击“清除登录态”会同时删除内存与持久化文件。
+          Cookie 仅保存在当前服务内存中，重启后自动清除，不会写入解析结果、日志或本机文件。点击“清除登录态”可立即删除。
         </p>
         {status.storage_error ? <p className="inline-message inline-message--error">{status.storage_error}</p> : null}
       </div>

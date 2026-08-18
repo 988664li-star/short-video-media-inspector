@@ -71,7 +71,7 @@ export function TranscriptPanel({ transcription, loading, error, onExtract }: Tr
             <span>{transcription.device.toUpperCase()} · {transcription.compute_type}</span>
             <span>{formatTimestamp(transcription.duration_seconds)}</span>
             <span>{transcription.source_kind === "audio" ? "独立音轨" : "视频音轨"}</span>
-            <span>{transcription.cached ? "缓存结果" : `${transcription.elapsed_seconds.toFixed(1)} 秒完成`}</span>
+            <span>{transcription.cached ? "临时缓存" : `${transcription.elapsed_seconds.toFixed(1)} 秒完成`}</span>
           </div>
           <p className="transcript-text">{transcription.text || "没有识别到清晰的人声内容。"}</p>
           {transcription.segments.length > 1 ? (
@@ -93,7 +93,7 @@ export function TranscriptPanel({ transcription, loading, error, onExtract }: Tr
           <FileText />
           <div>
             <strong>按需生成视频文案</strong>
-            <p>点击“提取文案”后才会加载模型并使用显卡或 CPU 进行识别。</p>
+            <p>点击“提取文案”后才会加载模型；文案仅作短时缓存并自动清理。</p>
           </div>
         </div>
       )}

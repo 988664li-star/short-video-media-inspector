@@ -23,6 +23,20 @@ class TranscriptionRequest(StrictRequest):
     )
 
 
+class ShotDetectionRequest(StrictRequest):
+    aweme_id: str = Field(min_length=10, max_length=30, pattern=r"^\d+$")
+    media_url: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^/api/media/[a-f0-9]{32}/\d+$",
+    )
+
+
+class SceneAnalysisRequest(StrictRequest):
+    context: str = Field(default="", max_length=2_000)
+    force: bool = False
+
+
 class CookieRequest(StrictRequest):
     cookie: str = Field(min_length=1)
 
