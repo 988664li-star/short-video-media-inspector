@@ -1,0 +1,19 @@
+{
+  "segment_id": "整数，必须与输入一致",
+  "segment_summary": "这一段的内容与节奏概述",
+  "storyboard": [
+    {
+      "order": "与输入 shots.order 一致",
+      "time_range_ms": [0, 0],
+      "title": "镜头标题",
+      "scene_type": "Hook / Proof / Demonstration / CTA / Transition / Other",
+      "visual_description": "客观画面",
+      "action": "主体动作",
+      "shot_size": "特写 / 近景 / 中景 / 全景 / 未知",
+      "camera_angle": "平视 / 俯视 / 仰视 / 顶视 / 未知",
+      "camera_motion": "静态 / 推进 / 拉远 / 平移 / 跟拍 / 未知",
+      "shooting_notes": "非空字符串；基于画面给出可执行拍摄或剪辑指令，无可验证指令时填“无”"
+    }
+  ],
+  "segment_script": "按时间顺序串起本段的完整拍摄脚本"
+}

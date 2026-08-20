@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictRequest(BaseModel):
@@ -32,9 +32,56 @@ class ShotDetectionRequest(StrictRequest):
     )
 
 
-class SceneAnalysisRequest(StrictRequest):
+class StoryboardScriptRequest(StrictRequest):
     context: str = Field(default="", max_length=2_000)
     force: bool = False
+
+
+class SeedanceReferenceAssetRequest(StrictRequest):
+    slot_index: int = Field(ge=0, le=2)
+    file_id: str = Field(min_length=1, max_length=128)
+    filename: str = Field(default="", max_length=255)
+    label: str = Field(default="", max_length=120)
+
+
+class SeedanceReplacementBindingRequest(StrictRequest):
+    candidate_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
+    enabled: bool = False
+    target_description: str = Field(default="", max_length=800)
+    assets: list[SeedanceReferenceAssetRequest] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_unique_slots(self) -> "SeedanceReplacementBindingRequest":
+        slots = [asset.slot_index for asset in self.assets]
+        if len(slots) != len(set(slots)):
+            raise ValueError("同一对象的参考图片序号不能重复")
+        return self
+
+
+class SeedanceWorkspaceRequest(StrictRequest):
+    model: Literal[
+        "doubao-seedance-2-0-mini-260615",
+        "doubao-seedance-2-0-260128",
+        "doubao-seedance-2-0-fast-260128",
+    ] = "doubao-seedance-2-0-mini-260615"
+    generation_mode: Literal["segment_with_anchor", "whole_video"] = "segment_with_anchor"
+    source_video_file_id: str = Field(default="", max_length=128)
+    prompt: str = Field(default="", max_length=12_000)
+    bindings: list[SeedanceReplacementBindingRequest] = Field(default_factory=list, max_length=12)
+
+
+class SeedanceAnchorImageRequest(StrictRequest):
+    segment_id: int = Field(ge=1, le=999)
+    force: bool = False
+
+
+class SeedanceAnchorImageBindingRequest(StrictRequest):
+    file_id: str = Field(min_length=1, max_length=128)
+
+
+
+class SeedanceTaskSubmitRequest(StrictRequest):
+    segment_id: int | None = Field(default=None, ge=1, le=999)
 
 
 class CookieRequest(StrictRequest):

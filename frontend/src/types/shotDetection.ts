@@ -26,52 +26,24 @@ export interface ShotDetectionResult {
   asset_base_url: string;
 }
 
-export interface SceneVisualAnalysis {
-  scene_id: number;
-  scene_type: string;
-  visual_subject: string[];
-  action: string;
-  shot_size: string;
-  camera_angle: string;
-  camera_motion: string;
-  scene_description: string;
-  conversion_purpose: string;
-  evidence: string[];
-  usage?: Record<string, number>;
-}
+export type ReplacementCandidateType =
+  "person" | "product" | "background" | "screen" | "text" | "other";
 
-export interface SceneVisualAnalysisResult {
-  analysis_id: string;
-  model: string;
-  scene_analyses: SceneVisualAnalysis[];
-  cached: boolean;
-}
-
-export interface ReplicaContentStage {
-  stage: string;
+export interface ReplacementCandidate {
+  candidate_id: string;
+  type: ReplacementCandidateType;
+  source_description: string;
   scene_ids: number[];
-  time_range_ms: [number, number];
-  strategy: string;
-  evidence: string[];
-}
-
-export interface ReplicaShot {
-  scene_id: number;
-  duration_ms: number;
-  scene_function: string;
-  shooting_direction: string;
-  voiceover_strategy: string;
-  editing_direction: string;
-  must_preserve: string[];
-  adaptable_variables: string[];
+  time_ranges_ms: [number, number][];
+  replacement_reason: string;
+  reference_requirements: string[];
+  preserve_constraints: string[];
 }
 
 export interface ReplicaPlaybook {
-  video_positioning?: string;
-  content_structure?: ReplicaContentStage[];
-  replica_shots?: ReplicaShot[];
-  replication_formula?: string[];
-  production_checklist?: string[];
+  source_summary?: string;
+  global_preserve_constraints?: string[];
+  replacement_candidates?: ReplacementCandidate[];
   data_gaps?: string[];
 }
 
@@ -80,4 +52,185 @@ export interface ReplicaPlaybookResult {
   model: string;
   playbook: ReplicaPlaybook;
   cached: boolean;
+}
+
+export interface SeedanceReferenceAsset {
+  slot_index: number;
+  file_id: string;
+  filename: string;
+  label: string;
+}
+
+export type SeedanceModelId =
+  | "doubao-seedance-2-0-mini-260615"
+  | "doubao-seedance-2-0-260128"
+  | "doubao-seedance-2-0-fast-260128";
+
+export type SeedanceGenerationMode = "segment_with_anchor" | "whole_video";
+
+export interface SeedanceReplacementBinding {
+  candidate_id: string;
+  enabled: boolean;
+  target_description?: string;
+  assets: SeedanceReferenceAsset[];
+}
+
+export interface SeedanceWorkspace {
+  analysis_id: string;
+  model: SeedanceModelId;
+  generation_mode: SeedanceGenerationMode;
+  source_video_file_id: string;
+  prompt: string;
+  bindings: SeedanceReplacementBinding[];
+  version: number;
+  updated_at: number;
+}
+
+export interface ArkFile {
+  id: string;
+  filename: string;
+  mime_type: string;
+  bytes: number;
+  status: "processing" | "active" | "failed" | string;
+  download_url: string;
+  expire_at: number | null;
+  created_at: number;
+  error: Record<string, unknown>;
+}
+
+export interface SeedanceTask {
+  local_task_id: string;
+  provider_task_id: string | null;
+  segment_id: number | null;
+  segment_start_ms: number | null;
+  segment_end_ms: number | null;
+  model: string;
+  status: string;
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  error_message: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ArkApiEvent {
+  id: number;
+  operation: string;
+  method: string;
+  url: string;
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  status_code: number | null;
+  error_message: string;
+  created_at: number;
+}
+
+export interface SeedanceWorkspaceResult {
+  analysis_id: string;
+  workspace: SeedanceWorkspace | null;
+  tasks: SeedanceTask[];
+  ark_events: ArkApiEvent[];
+  anchors: SeedanceVisualAnchor[];
+  shot_anchors: SeedanceShotVisualAnchor[];
+}
+
+export interface SeedanceVisualAnchor {
+  segment_id: number;
+  model: string;
+  prompt: string;
+  status: string;
+  anchor_file_id: string;
+  response: Record<string, unknown>;
+  error_message: string;
+  updated_at: number;
+}
+
+export interface SeedanceShotVisualAnchor extends SeedanceVisualAnchor {
+  shot_order: number;
+  scene_id: number;
+  start_ms: number;
+  end_ms: number;
+  source_frame_path: string;
+}
+
+export interface SeedanceAnchorImagePreviewInput {
+  image_index: number;
+  kind: "source_contact_sheet" | "target_product";
+  label: string;
+  source_frame_path?: string;
+  candidate_id?: string;
+  file_id?: string;
+}
+
+export interface SeedanceAnchorImagePreview {
+  segment_id: number;
+  start_ms: number;
+  end_ms: number;
+  source_frame_path: string;
+  prompt: string;
+  inputs: SeedanceAnchorImagePreviewInput[];
+  ready: boolean;
+  message: string;
+  model: string;
+}
+
+export interface SeedanceAnchorImagePreviewResult {
+  previews: SeedanceAnchorImagePreview[];
+}
+
+export interface SeedanceRequestPlanSegment {
+  segment: {
+    segment_id: number;
+    start_ms: number;
+    end_ms: number;
+  } | null;
+  request: Record<string, unknown>;
+}
+
+export interface SeedanceRequestPlan {
+  mode: SeedanceGenerationMode;
+  segments: SeedanceRequestPlanSegment[];
+}
+
+export interface SeedanceRequestPreviewResult {
+  plan: SeedanceRequestPlan;
+}
+
+export interface StoryboardScriptShot {
+  order: number;
+  time_range_ms: [number, number];
+  title: string;
+  scene_type: string;
+  visual_description: string;
+  action: string;
+  shot_size: string;
+  camera_angle: string;
+  camera_motion: string;
+  voiceover: string;
+  shooting_notes: string;
+}
+
+export interface StoryboardScriptSegment {
+  segment_id: number;
+  start_ms: number;
+  end_ms: number;
+  duration_ms: number;
+  contact_sheet: string;
+  segment_summary: string;
+  storyboard: StoryboardScriptShot[];
+  segment_script: string;
+  usage?: Record<string, number>;
+}
+
+export interface StoryboardScriptResult {
+  analysis_id: string;
+  model: string;
+  segments: StoryboardScriptSegment[];
+  cached: boolean;
+}
+
+export interface SavedShotAnalysisState {
+  detection: ShotDetectionResult;
+  storyboard_script: StoryboardScriptResult | null;
+  replica_playbook: ReplicaPlaybookResult | null;
 }

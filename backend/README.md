@@ -46,6 +46,10 @@ PUNCTUATION_MODEL=ct-punc
 PUNCTUATION_DEVICE=cpu
 WHISPER_LANGUAGE=zh
 TRANSCRIPTION_CACHE_TTL_SECONDS=1800
+VOCAL_SEPARATION_ENABLED=true
+VOCAL_SEPARATION_MODEL=htdemucs
+VOCAL_SEPARATION_DEVICE=cpu
+VOCAL_SEPARATION_TIMEOUT_SECONDS=600
 MEDIA_SESSION_TTL_SECONDS=600
 PRIVACY_CLEANUP_INTERVAL_SECONDS=60
 ```
@@ -87,15 +91,41 @@ SHOT_DETECTION_FFMPEG_BINARY=ffmpeg
 镜头边界由 PySceneDetect 的 `ContentDetector` 在 CPU 上识别，默认阈值为 27；数值越小
 越敏感，越容易切出更多镜头。FFmpeg 负责导出镜头视频和关键帧资产，无需 CUDA。
 
-在自动分镜完成后，前端可按需触发两个后续阶段：镜头视觉分析会使用已下载的
-`source.mp4` 生成 `transcript.json` 和 `scene_packages.json`，随后逐镜头生成
-`scene_analysis.json`；复刻方案再汇总为 `replica_playbook.json`。这些文件和分镜素材
-始终保存在同一个 `backend/data/shot_detection/<分析键>/` 目录。
+在自动分镜完成后，前端可按需生成分段分镜脚本：服务会使用已下载的 `source.mp4`
+生成 `transcript.json` 和 `scene_packages.json`，将关键帧拼接为分镜图后，再由视觉模型
+按片段生成脚本。替换方案随后汇总为 `replica_playbook.json`，用于识别可替换的人物、产品、背景和屏幕元素，并生成视频编辑提示词。这些文件和分镜素材始终
+保存在同一个 `backend/data/shot_detection/<分析键>/` 目录。
 
-视觉分析和复刻方案需要由服务端环境变量提供密钥，且只有用户点击相应按钮时才会调用：
+分段分镜脚本和替换方案需要由服务端环境变量提供密钥，且只有用户点击相应按钮时才会调用：
 
 ```bash
 SILICONFLOW_API_KEY=你的密钥
-SILICONFLOW_MODEL=Qwen/Qwen3.6-27B
+# 分段分镜脚本（多图/视频理解）
+SILICONFLOW_VISION_MODEL=Qwen/Qwen3-Omni-30B-A3B-Instruct
+# 替换方案等纯文本汇总；不填时沿用 SILICONFLOW_MODEL
+SILICONFLOW_TEXT_MODEL=Qwen/Qwen3.6-27B
 REPLICA_PRIMARY_OVERLAP_SECONDS=0.3
 ```
+
+## Seedance 2.0 Mini 测试工作台
+
+“替换方案”页会将用户选择的替换对象、方舟 File ID、可编辑提示词和每次任务快照
+保存在 `backend/data/replica_workspaces.sqlite3`。用户在网页选择本地图片或视频后，
+后端会直接以 multipart 上传到方舟 Files API；页面也会读取该账号下已有的
+`user_data` 文件供选择。SQLite 只保存 `file_id`，因此刷新网页、切换分镜标签或重启
+服务后仍可恢复素材和提示词的对应关系。
+
+默认只有 Seedance 2.0 Mini：
+
+```bash
+# 可选；未配置时“提交 Seedance 测试”会被安全阻断，不会产生调用费用。
+ARK_API_KEY=你的方舟 API Key
+# 可选覆盖项
+REPLICA_WORKSPACE_DB_PATH=backend/data/replica_workspaces.sqlite3
+```
+
+上传/选择文件不会调用视频生成模型。保存工作台和修改提示词只写 SQLite。只有用户
+勾选计费确认并点击“提交 Seedance 测试”时，后端才会先刷新已选 File ID，拿到有效
+下载地址后按官方内容生成协议发送：原视频使用 `reference_video`，已勾选对象的参考图
+按工作台顺序使用 `reference_image`，并默认关闭生成音频和水印。每次任务保存独立
+请求快照，方便用不同提示词人工对比结果。

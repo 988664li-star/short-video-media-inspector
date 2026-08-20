@@ -3,6 +3,8 @@
 @import "./layout.css";
 @import "./primitives.css";
 @import "./scrollbars.css";
+@import "./session.css";
+@import "./inspector-input.css";
 @import "./inspector.css";
 @import "./results.css";
 @import "./transcription.css";
@@ -11,4 +13,3 @@
 @import "./replication.css";
 @import "./shot-detection.css";
 @import "./replica-analysis.css";
-@import "./responsive.css";

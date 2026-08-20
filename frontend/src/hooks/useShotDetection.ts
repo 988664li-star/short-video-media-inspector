@@ -16,13 +16,22 @@ export function useShotDetection() {
     try {
       const nextResult = await detectShots(awemeId, mediaUrl);
       if (requestId.current === currentRequest) setResult(nextResult);
+      return nextResult;
     } catch (requestError) {
       if (requestId.current === currentRequest) {
         setError(requestError instanceof Error ? requestError.message : "自动分镜失败，请稍后重试。");
       }
+      return null;
     } finally {
       if (requestId.current === currentRequest) setLoading(false);
     }
+  }, []);
+
+  const restore = useCallback((savedResult: ShotDetectionResult) => {
+    requestId.current += 1;
+    setResult(savedResult);
+    setLoading(false);
+    setError("");
   }, []);
 
   const reset = useCallback(() => {
@@ -32,5 +41,5 @@ export function useShotDetection() {
     setError("");
   }, []);
 
-  return { result, loading, error, detect, reset };
+  return { result, loading, error, detect, restore, reset };
 }

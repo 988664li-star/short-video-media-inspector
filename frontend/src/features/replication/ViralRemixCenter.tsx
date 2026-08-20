@@ -34,8 +34,8 @@ const WORKFLOW_STEPS = [
   },
   {
     icon: Lightbulb,
-    title: "组织新方案",
-    description: "保留有效结构，换成自己的表达、素材与创作角度。",
+    title: "生成替换提示词",
+    description: "选择画面中要替换的对象并上传参考素材，生成视频编辑模型可执行的提示词。",
   },
 ] as const;
 

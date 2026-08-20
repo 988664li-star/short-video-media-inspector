@@ -1,12 +1,16 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.32,<1
 httpx==0.28.1
+python-multipart>=0.0.20,<1
+minio>=7.2,<8
 python-dotenv>=1.0,<2
 av==18.1.0
+Pillow>=11,<12
 scenedetect[opencv]>=0.6.5,<0.7
 faster-whisper==1.2.1
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.11.0+cpu
 torchaudio==2.11.0+cpu
+demucs==4.0.1
 funasr==1.4.2
 -e .

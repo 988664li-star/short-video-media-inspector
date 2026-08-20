@@ -65,6 +65,9 @@ coverage.xml
 # Local backend secrets and runtime state
 backend/data/
 
+# Local media inputs and generated previews
+/*.mp4
+
 # Superseded local prototype (React + FastAPI are the maintained application)
 /web/
 /web_app.py

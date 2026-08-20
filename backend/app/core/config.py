@@ -49,6 +49,18 @@ class Settings:
     transcription_cache_ttl_seconds: int = int(
         os.environ.get("TRANSCRIPTION_CACHE_TTL_SECONDS", str(30 * 60))
     )
+    vocal_separation_enabled: bool = os.environ.get(
+        "VOCAL_SEPARATION_ENABLED", "true"
+    ).lower() in {"1", "true", "yes", "on"}
+    vocal_separation_model: str = os.environ.get(
+        "VOCAL_SEPARATION_MODEL", "htdemucs"
+    )
+    vocal_separation_device: str = os.environ.get(
+        "VOCAL_SEPARATION_DEVICE", "cpu"
+    )
+    vocal_separation_timeout_seconds: int = int(
+        os.environ.get("VOCAL_SEPARATION_TIMEOUT_SECONDS", "600")
+    )
     shot_detection_data_path: Path = Path(
         os.environ.get(
             "SHOT_DETECTION_DATA_PATH",
@@ -70,6 +82,54 @@ class Settings:
     shot_detection_ffmpeg_binary: str = os.environ.get(
         "SHOT_DETECTION_FFMPEG_BINARY", "ffmpeg"
     )
+    replica_workspace_db_path: Path = Path(
+        os.environ.get(
+            "REPLICA_WORKSPACE_DB_PATH",
+            DEFAULT_BACKEND_DATA_PATH / "replica_workspaces.sqlite3",
+        )
+    )
+    seedance_api_key: str = os.environ.get("ARK_API_KEY", "")
+    seedance_api_url: str = os.environ.get(
+        "VOLCENGINE_ARK_CONTENT_GENERATION_URL",
+        "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks",
+    )
+    seedream_api_url: str = os.environ.get(
+        "VOLCENGINE_ARK_IMAGE_GENERATION_URL",
+        "https://ark.cn-beijing.volces.com/api/v3/images/generations",
+    )
+    seedream_model: str = os.environ.get(
+        "SEEDREAM_MODEL", "doubao-seedream-5-0-260128"
+    )
+    # GPT Image 2 settings are read when the backend process starts. Keep this
+    # opt-in single-shot anchor edit provider independent from Ark credentials.
+    gpt_image_api_key: str = os.environ.get("GPT_IMAGE_API_KEY", "")
+    gpt_image_edits_url: str = os.environ.get(
+        "GPT_IMAGE_EDITS_URL",
+        "https://dm-fox.rjj.cc/codex/v1/images/edits",
+    )
+    gpt_image_model: str = os.environ.get("GPT_IMAGE_MODEL", "gpt-image-2")
+    ark_files_api_url: str = os.environ.get(
+        "VOLCENGINE_ARK_FILES_API_URL",
+        "https://ark.cn-beijing.volces.com/api/v3/files",
+    )
+    ark_file_max_bytes: int = int(
+        os.environ.get("VOLCENGINE_ARK_FILE_MAX_BYTES", str(512 * 1024 * 1024))
+    )
+    seedance_object_storage_endpoint: str = os.environ.get(
+        "SEEDANCE_OBJECT_STORAGE_ENDPOINT", ""
+    )
+    seedance_object_storage_access_key: str = os.environ.get(
+        "SEEDANCE_OBJECT_STORAGE_ACCESS_KEY", ""
+    )
+    seedance_object_storage_secret_key: str = os.environ.get(
+        "SEEDANCE_OBJECT_STORAGE_SECRET_KEY", ""
+    )
+    seedance_object_storage_bucket: str = os.environ.get(
+        "SEEDANCE_OBJECT_STORAGE_BUCKET", "f2-seedance-test"
+    )
+    seedance_object_storage_presign_seconds: int = int(
+        os.environ.get("SEEDANCE_OBJECT_STORAGE_PRESIGN_SECONDS", "3600")
+    )
     replica_primary_overlap_seconds: float = float(
         os.environ.get("REPLICA_PRIMARY_OVERLAP_SECONDS", "0.3")
     )
@@ -79,6 +139,14 @@ class Settings:
     )
     replica_analysis_model: str = os.environ.get(
         "SILICONFLOW_MODEL", "Qwen/Qwen3.6-27B"
+    )
+    # 视觉任务和纯文本汇总可分别选模型；未单独配置文本模型时保留旧配置的兼容性。
+    replica_vision_model: str = os.environ.get(
+        "SILICONFLOW_VISION_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+    )
+    replica_text_model: str = os.environ.get(
+        "SILICONFLOW_TEXT_MODEL",
+        os.environ.get("SILICONFLOW_MODEL", "Qwen/Qwen3.6-27B"),
     )
     media_session_ttl_seconds: int = int(
         os.environ.get("MEDIA_SESSION_TTL_SECONDS", str(10 * 60))

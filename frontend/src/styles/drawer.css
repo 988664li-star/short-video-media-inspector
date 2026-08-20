@@ -34,3 +34,17 @@
 .drawer-pagination .loading-ring + p { width: auto; }
 .drawer-pagination .loading-ring--small { width: 1.25rem; height: 1.25rem; border-width: 2px; }
 .drawer-pagination .drawer-pagination-error { color: var(--color-danger); }
+
+@media (max-width: 680px) {
+  .user-drawer { width: 100%; border-left: 0; }
+  .drawer-header { min-height: 4.375rem; padding: .6875rem .875rem; }
+  .drawer-header h2 { max-width: 16.25rem; overflow: hidden; font-size: var(--text-lg); text-overflow: ellipsis; white-space: nowrap; }
+  .drawer-content { padding: 1.0625rem .875rem var(--space-6); }
+  .drawer-profile { grid-template-columns: 4.375rem minmax(0, 1fr); gap: .8125rem; }
+  .drawer-avatar { width: 4.375rem; height: 4.375rem; }
+  .drawer-profile h3 { font-size: 1.1875rem; }
+  .drawer-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .drawer-info { grid-template-columns: 1fr; }
+  .drawer-content .media-list-item { grid-template-columns: 5.125rem minmax(0, 1fr); }
+  .drawer-content .media-list-item > img, .drawer-content .media-list-placeholder { width: 5.125rem; height: 6.875rem; }
+}

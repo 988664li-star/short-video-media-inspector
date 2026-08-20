@@ -46,7 +46,7 @@ export function InputPanel({
   return (
     <section className="input-panel" aria-labelledby="input-heading">
       <div className="section-heading">
-        <h2 id="input-heading">粘贴分享内容</h2>
+        <h2 id="input-heading">分享链接</h2>
         <div className="input-actions">
           <label className="platform-select-label">
             <span>平台</span>
@@ -67,6 +67,7 @@ export function InputPanel({
           onKeyDown={handleKeyDown}
           spellCheck={false}
           aria-label="抖音或 TikTok 分享文案或链接"
+          placeholder="粘贴抖音分享文案或链接"
         />
         <Button
           variant="primary"
@@ -75,7 +76,7 @@ export function InputPanel({
           onClick={onResolve}
           icon={loading ? <LoaderCircle className="spin" /> : <ScanLine />}
         >
-          {loading ? "正在解析" : "解析媒体"}
+          {loading ? "正在解析" : "解析作品"}
         </Button>
       </div>
       <div className={`main-message main-message--${messageTone}`} role="status">{message}</div>

@@ -14,6 +14,7 @@ import { ReplicationPage } from "../pages/ReplicationPage";
 
 export function App() {
   const { page, navigate } = useWorkspaceRoute();
+  const pageTitle = page === "inspector" ? "作品解析" : page === "capabilities" ? "能力中心" : "爆款复刻";
   const inspector = useInspector();
   const drawer = useUserDrawer();
   const handleSessionCleared = useCallback(() => {
@@ -37,23 +38,26 @@ export function App() {
   return (
     <>
       <div className="app-shell">
-        <AppHeader />
         <WorkspaceNavigation activePage={page} onNavigate={navigate} />
-        <main>
-          {page === "inspector" ? (
-            <InspectorPage
-              inspector={inspector}
-              session={session}
-              onInspect={inspectAweme}
-              onOpenUser={(user) => void drawer.open(user)}
-              onReset={resetInspector}
-            />
-          ) : page === "capabilities" ? (
-            <CapabilitiesPage session={session} onInspect={inspectAweme} onOpenUser={(user) => void drawer.open(user)} />
-          ) : (
-            <ReplicationPage inspector={inspector} onReset={resetInspector} />
-          )}
-        </main>
+        <div className="workspace-frame">
+          <AppHeader />
+          <main className="workspace-main">
+            <div className="page-title"><h1>{pageTitle}</h1></div>
+            {page === "inspector" ? (
+              <InspectorPage
+                inspector={inspector}
+                session={session}
+                onInspect={inspectAweme}
+                onOpenUser={(user) => void drawer.open(user)}
+                onReset={resetInspector}
+              />
+            ) : page === "capabilities" ? (
+              <CapabilitiesPage session={session} onInspect={inspectAweme} onOpenUser={(user) => void drawer.open(user)} />
+            ) : (
+              <ReplicationPage inspector={inspector} onReset={resetInspector} />
+            )}
+          </main>
+        </div>
       </div>
       <UserDrawer
         user={drawer.user}

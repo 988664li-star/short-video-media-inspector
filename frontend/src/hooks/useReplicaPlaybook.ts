@@ -32,5 +32,12 @@ export function useReplicaPlaybook() {
     setError("");
   }, []);
 
-  return { result, loading, error, build, reset };
+  const restore = useCallback((savedResult: ReplicaPlaybookResult | null) => {
+    requestId.current += 1;
+    setResult(savedResult);
+    setLoading(false);
+    setError("");
+  }, []);
+
+  return { result, loading, error, build, restore, reset };
 }

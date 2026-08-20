@@ -1,0 +1,17 @@
+{
+  "source_summary": "源视频中可用于替换的可观察主体概述",
+  "global_preserve_constraints": ["替换时整条视频必须保留的镜头、节奏、光线或剪辑约束"],
+  "replacement_candidates": [
+    {
+      "candidate_id": "person_01 / product_01 / background_01 / screen_01 / text_01",
+      "type": "person / product / background / screen / text / other",
+      "source_description": "源视频中该对象的客观描述",
+      "scene_ids": [1],
+      "time_ranges_ms": [[0, 0]],
+      "replacement_reason": "为何适合作为用户可选替换对象",
+      "reference_requirements": ["用户上传此对象时需要的参考图、视频或文字素材"],
+      "preserve_constraints": ["替换后仍须保留的构图、动作、遮挡、透视、光线或连续性"]
+    }
+  ],
+  "data_gaps": ["待补信息"]
+}
