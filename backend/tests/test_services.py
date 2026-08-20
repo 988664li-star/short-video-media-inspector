@@ -24,24 +24,6 @@ def test_normalize_login_cookie_accepts_request_header_value():
     assert names == ["sessionid", "ttwid", "msToken"]
 
 
-def test_login_cookie_store_restores_after_restart_and_uses_private_file(tmp_path):
-    storage_path = tmp_path / "private" / "douyin_cookie.json"
-    first_store = LoginCookieStore(storage_path)
-    status = first_store.set("sessionid=private-value; ttwid=device-value;")
-
-    assert status["storage"] == "backend_file"
-    assert storage_path.exists()
-    assert storage_path.stat().st_mode & 0o777 == 0o600
-    assert storage_path.parent.stat().st_mode & 0o777 == 0o700
-
-    restored_store = LoginCookieStore(storage_path)
-    assert restored_store.status()["configured"] is True
-    assert restored_store.get() == ("sessionid=private-value; ttwid=device-value;")
-
-    restored_store.clear()
-    assert not storage_path.exists()
-
-
 def test_anonymous_cookie_is_reused_for_cursor_pagination(monkeypatch):
     anonymous_douyin_cookie.cache_clear()
     monkeypatch.setattr(

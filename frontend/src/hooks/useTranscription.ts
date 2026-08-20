@@ -7,7 +7,7 @@ import type { InspectorData, TranscriptionData } from "../types/douyin";
 const transcriptCache = new Map<string, TranscriptionData>();
 const pendingTranscriptions = new Map<string, Promise<TranscriptionData>>();
 
-export interface TranscriptionState {
+interface TranscriptionState {
   data: TranscriptionData | null;
   loading: boolean;
   error: string;

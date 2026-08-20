@@ -38,7 +38,7 @@ function MediaListItem({ item, onInspect }: { item: AwemeSummary; onInspect: Med
 }
 
 export function MediaList({ items, onInspect, warning }: MediaListProps) {
-  if (!items.length && !warning) return <p className="panel-empty">接口没有返回作品。</p>;
+  if (!items.length && !warning) return <p className="panel-empty">暂无可展示的作品。</p>;
   return (
     <div className="media-list">
       {warning ? <p className="inline-warning">近期作品未完整返回：{warning}</p> : null}

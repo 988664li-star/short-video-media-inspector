@@ -6,12 +6,21 @@ interface ApiErrorPayload {
   detail?: string | Array<{ msg?: string }>;
 }
 
+const INTERNAL_ERROR_PATTERN = /(?:traceback|file\s+["'][^"']+["']\s*,?\s*line\s+\d+|\/(?:home|users|var|tmp|opt|srv)\/|[a-z]:\\|localhost|127\.0\.0\.1|sqlite|(?:authorization|api[_ -]?key|bearer|cookie|token)\s*[:=]|https?:\/\/\S+(?:token|signature|x-signature)=)/i;
+
+export const publicErrorMessage = (message: unknown, fallback: string): string => {
+  if (typeof message !== "string") return fallback;
+  const normalized = message.trim();
+  if (!normalized || normalized.length > 240 || INTERNAL_ERROR_PATTERN.test(normalized)) return fallback;
+  return normalized;
+};
+
 const errorMessage = (payload: ApiErrorPayload, fallback: string): string => {
-  if (typeof payload.detail === "string") return payload.detail;
+  if (typeof payload.detail === "string") return publicErrorMessage(payload.detail, fallback);
   if (Array.isArray(payload.detail)) {
-    return payload.detail.map((item) => item.msg).filter(Boolean).join("；") || fallback;
+    return publicErrorMessage(payload.detail.map((item) => item.msg).filter(Boolean).join("；"), fallback);
   }
-  return payload.error || fallback;
+  return publicErrorMessage(payload.error, fallback);
 };
 
 export async function apiRequest<T>(

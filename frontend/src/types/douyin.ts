@@ -6,7 +6,7 @@ export interface MediaAsset {
   proxy_url: string;
 }
 
-export interface TranscriptionSegment {
+interface TranscriptionSegment {
   start: number;
   end: number;
   text: string;
@@ -62,7 +62,7 @@ export interface AuthorProfile extends UserSummary {
   is_ban?: boolean;
 }
 
-export interface Statistics {
+interface Statistics {
   likes?: number;
   comments?: number;
   shares?: number;
@@ -71,7 +71,7 @@ export interface Statistics {
   plays?: number;
 }
 
-export interface CommentReply {
+interface CommentReply {
   id: string;
   text: string;
   created_at?: string;
@@ -101,7 +101,7 @@ export interface AwemeSummary {
   douyin_url?: string;
 }
 
-export interface MusicInfo {
+interface MusicInfo {
   id?: string;
   mid?: string;
   title?: string;
@@ -118,7 +118,7 @@ export interface MusicInfo {
   cover?: MediaAsset;
 }
 
-export interface VideoTechnical {
+interface VideoTechnical {
   format?: string;
   ratio?: string;
   has_watermark?: boolean;
@@ -183,7 +183,7 @@ export interface UserProfilePayload {
   pagination: UserPostsPagination;
 }
 
-export interface UserPostsPagination {
+interface UserPostsPagination {
   has_more: boolean;
   next_cursor?: number | null;
 }
@@ -198,12 +198,10 @@ export interface SessionStatus {
   configured: boolean;
   cookie_count: number;
   has_login_markers: boolean;
-  storage?: "backend_file" | "memory";
-  storage_error?: string | null;
   message?: string;
 }
 
-export interface CursorPagination {
+interface CursorPagination {
   has_more: boolean;
   next_cursor?: number | null;
 }

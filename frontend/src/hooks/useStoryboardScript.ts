@@ -17,6 +17,7 @@ export function useStoryboardScript() {
     setProgressMessage("正在准备分段分镜图");
     setResult(null);
     try {
+      let completedResult: StoryboardScriptResult | null = null;
       await streamStoryboardScript(analysisId, context, force, (event) => {
         if (requestId.current !== currentRequest) return;
         if (event.type === "progress") {
@@ -38,11 +39,14 @@ export function useStoryboardScript() {
         }
         setProgressMessage("分段分镜脚本已完成");
         setResult(event.result);
+        completedResult = event.result;
       });
+      return completedResult;
     } catch (requestError) {
       if (requestId.current === currentRequest) {
         setError(requestError instanceof Error ? requestError.message : "生成分段分镜脚本失败，请稍后重试。");
       }
+      return null;
     } finally {
       if (requestId.current === currentRequest) setLoading(false);
     }

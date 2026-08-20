@@ -1,7 +1,6 @@
-import { Copy, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
 import { AvatarButton } from "../../components/ui/AvatarButton";
-import { copyText } from "../../lib/clipboard";
 import { formatCount, formatDuration } from "../../lib/formatters";
 import type { InspectorData, MediaAsset, UserSummary } from "../../types/douyin";
 
@@ -13,12 +12,10 @@ interface MediaDetailsProps {
 
 function UrlRow({ label, media }: { label: string; media?: MediaAsset }) {
   if (!media?.source_url) return null;
-  const copy = async () => copyText(media.source_url || "");
   return (
     <div className="url-row">
       <span>{label}</span>
-      <code title={media.source_url}>{media.source_url}</code>
-      <button type="button" onClick={copy} aria-label={`复制${label}`} title={`复制${label}`}><Copy /></button>
+      <span className="url-row__availability">已获取，可直接查看</span>
       <a href={media.proxy_url} target="_blank" rel="noreferrer" aria-label={`打开${label}`} title={`打开${label}`}><ExternalLink /></a>
     </div>
   );

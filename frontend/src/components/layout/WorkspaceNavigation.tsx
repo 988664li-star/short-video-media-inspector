@@ -1,4 +1,4 @@
-import { Clapperboard, FileSearch, LayoutGrid, Play } from "lucide-react";
+import { Clapperboard, FileSearch, LayoutGrid, Play, Replace } from "lucide-react";
 
 import { WORKSPACE_ROUTE, type WorkspacePage } from "../../app/workspaceRoutes";
 import { CAPABILITIES } from "../../features/capabilities/catalog";
@@ -14,22 +14,24 @@ const NAVIGATION_ITEMS = [
   { page: "replication", label: "爆款复刻", icon: Clapperboard },
 ] as const;
 
-export function WorkspaceNavigation({ activePage, onNavigate }: WorkspaceNavigationProps) {
+export function WorkspaceNavigation({
+  activePage,
+  onNavigate,
+}: WorkspaceNavigationProps) {
   return (
     <nav className="workspace-nav" aria-label="工作区">
       <div className="workspace-nav__brand">
         <span className="workspace-nav__brand-mark" aria-hidden="true"><Play /></span>
-        <div><strong>短视频媒体检查台</strong><small>本地 F2 工作台</small></div>
+        <div><strong>短视频媒体检查台</strong><small>抖音 / TikTok</small></div>
       </div>
       <div className="workspace-nav__links">
         {NAVIGATION_ITEMS.map((item) => {
           const Icon = item.icon;
-          return (
+          const link = (
             <a
               aria-current={activePage === item.page ? "page" : undefined}
               className={activePage === item.page ? "workspace-nav__active" : ""}
               href={WORKSPACE_ROUTE[item.page]}
-              key={item.page}
               onClick={(event) => {
                 if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                 event.preventDefault();
@@ -41,9 +43,26 @@ export function WorkspaceNavigation({ activePage, onNavigate }: WorkspaceNavigat
               {"count" in item ? <em>{item.count}</em> : null}
             </a>
           );
+
+          if (item.page !== "replication") return <div className="workspace-nav__item" key={item.page}>{link}</div>;
+
+          return (
+            <div className="workspace-nav__item workspace-nav__item--replication" key={item.page}>
+              {link}
+              {activePage === "replication" ? (
+                <div className="workspace-nav__subnav" aria-label="爆款复刻当前模式">
+                  <span className="workspace-nav__subnav-item workspace-nav__subnav-item--active" aria-current="page">
+                    <Replace aria-hidden="true" />
+                    <span>局部替换</span>
+                    <small>当前可用</small>
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          );
         })}
       </div>
-      <div className="workspace-nav__footer"><span />服务就绪<small>抖音 / TikTok</small></div>
+      <div className="workspace-nav__footer">媒体解析与创作辅助</div>
     </nav>
   );
 }

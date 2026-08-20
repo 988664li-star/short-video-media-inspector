@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import time
 
-from backend.app.services.session import LoginCookieStore, remove_cookie_file
+from backend.app.services.session import LoginCookieStore
 from backend.app.services.transcription import TranscriptionConfig, TranscriptionService
 
 
@@ -25,7 +25,10 @@ def _service(cache_path: Path, ttl_seconds: int) -> TranscriptionService:
 
 
 def test_default_cookie_store_only_uses_memory():
-    assert LoginCookieStore().status()["storage"] == "memory"
+    store = LoginCookieStore()
+    store.set("sessionid=secret")
+    store.clear()
+    assert store.status()["configured"] is False
 
 
 def test_expired_transcript_cache_is_removed(tmp_path: Path):
@@ -39,10 +42,3 @@ def test_expired_transcript_cache_is_removed(tmp_path: Path):
     assert service.cleanup_expired_cache() == 1
     assert not expired.exists()
     assert recent.exists()
-
-
-def test_legacy_cookie_file_is_removed(tmp_path: Path):
-    cookie_path = tmp_path / "douyin_cookie.json"
-    cookie_path.write_text('{"cookie":"sessionid=secret"}', encoding="utf-8")
-    remove_cookie_file(cookie_path)
-    assert not cookie_path.exists()

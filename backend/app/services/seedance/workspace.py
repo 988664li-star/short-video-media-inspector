@@ -93,8 +93,6 @@ class SeedanceWorkspaceService:
                 CREATE TABLE IF NOT EXISTS replica_workspaces (
                     analysis_id TEXT PRIMARY KEY,
                     model TEXT NOT NULL,
-                    generation_mode TEXT NOT NULL DEFAULT 'segment_with_anchor',
-                    source_video_url TEXT NOT NULL DEFAULT '',
                     prompt TEXT NOT NULL DEFAULT '',
                     bindings_json TEXT NOT NULL DEFAULT '[]',
                     version INTEGER NOT NULL DEFAULT 1,
@@ -203,18 +201,6 @@ class SeedanceWorkspaceService:
                     ON ark_api_events (analysis_id, created_at DESC, id DESC);
                 """
             )
-            columns = {
-                row["name"]
-                for row in connection.execute("PRAGMA table_info(replica_workspaces)")
-            }
-            if "source_video_file_id" not in columns:
-                connection.execute(
-                    "ALTER TABLE replica_workspaces ADD COLUMN source_video_file_id TEXT NOT NULL DEFAULT ''"
-                )
-            if "generation_mode" not in columns:
-                connection.execute(
-                    "ALTER TABLE replica_workspaces ADD COLUMN generation_mode TEXT NOT NULL DEFAULT 'segment_with_anchor'"
-                )
             task_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(seedance_tasks)")
             }
@@ -270,10 +256,6 @@ class SeedanceWorkspaceService:
         model = str(payload.get("model") or SEEDANCE_MINI_MODEL)
         if model not in SUPPORTED_SEEDANCE_MODELS:
             raise SeedanceWorkspaceError("请选择工作台提供的 Seedance 2.0 系列模型")
-        generation_mode = str(payload.get("generation_mode") or "whole_video")
-        if generation_mode not in {"segment_with_anchor", "whole_video"}:
-            raise SeedanceWorkspaceError("生成模式不正确")
-        source_video_file_id = str(payload.get("source_video_file_id") or "")
         prompt = str(payload.get("prompt") or "")
         bindings = payload.get("bindings")
         if not isinstance(bindings, list):
@@ -289,18 +271,16 @@ class SeedanceWorkspaceService:
             connection.execute(
                 """
                 INSERT INTO replica_workspaces
-                    (analysis_id, model, generation_mode, source_video_file_id, prompt, bindings_json, version, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (analysis_id, model, prompt, bindings_json, version, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(analysis_id) DO UPDATE SET
                     model = excluded.model,
-                    generation_mode = excluded.generation_mode,
-                    source_video_file_id = excluded.source_video_file_id,
                     prompt = excluded.prompt,
                     bindings_json = excluded.bindings_json,
                     version = excluded.version,
                     updated_at = excluded.updated_at
                 """,
-                (analysis_id, model, generation_mode, source_video_file_id, prompt, encoded_bindings, version, now),
+                (analysis_id, model, prompt, encoded_bindings, version, now),
             )
             if previous is None or previous["prompt"] != prompt:
                 connection.execute(
@@ -319,37 +299,9 @@ class SeedanceWorkspaceService:
         workspace = self.get_workspace(analysis_id)["workspace"]
         if workspace is None:
             raise SeedanceWorkspaceError("请先保存替换方案和素材绑定")
-        source_video_file_id = workspace["source_video_file_id"]
         prompt = workspace["prompt"].strip()
         if not prompt:
             raise SeedanceWorkspaceError("请先生成或填写测试提示词")
-
-        mode = str(workspace.get("generation_mode") or "whole_video")
-        if mode == "whole_video":
-            if segment_id is not None:
-                raise SeedanceWorkspaceError("整段原视频模式不支持选择分段")
-            references = self._collect_reference_file_ids(workspace["bindings"])
-            if not references:
-                raise SeedanceWorkspaceError("请至少选择一个对象，并上传或选择它的参考图片")
-            if len(references) > 9:
-                raise SeedanceWorkspaceError("Seedance 2.0 系列最多接受 9 张参考图片")
-            reference_urls = [
-                await self._resolve_file_download_url(analysis_id, file_id, "参考图片")
-                for file_id in references
-            ]
-            if not source_video_file_id:
-                raise SeedanceWorkspaceError("请先上传或选择原视频")
-            source_url = await self._resolve_file_download_url(
-                analysis_id, source_video_file_id, "原视频"
-            )
-            return {
-                "mode": "whole_video",
-                "segments": [
-                    self._request_plan_item(
-                        workspace["model"], prompt, source_url, reference_urls, None
-                    )
-                ],
-            }
 
         media = await self._ensure_segment_media(analysis_id)
         if segment_id is not None:
@@ -371,7 +323,7 @@ class SeedanceWorkspaceService:
                 )
             if anchor["status"] != "uploaded" and anchor["model"] != self._anchor_model_name:
                 raise SeedanceWorkspaceError(
-                    f"分段 {segment_id:02d} 仍是旧版联系图锚点；请用 GPT Image 2 重新编辑或上传人工处理后的干净拼图"
+                    f"分段 {segment_id:02d} 的锚点图不符合当前处理规则；请用 GPT Image 2 重新编辑或上传人工处理后的干净拼图"
                 )
             video_url = await self._resolve_file_download_url(
                 analysis_id, segment["video_file_id"], f"分段 {segment_id:02d} 原视频"
@@ -389,14 +341,7 @@ class SeedanceWorkspaceService:
                     segment,
                 )
             )
-        return {"mode": "segment_with_anchor", "segments": planned}
-
-    async def build_request(self, analysis_id: str) -> dict[str, Any]:
-        """Retain the old one-request accessor for whole-video callers/tests."""
-        plan = await self.build_request_plan(analysis_id)
-        if plan["mode"] != "whole_video":
-            raise SeedanceWorkspaceError("当前为分段视觉锚点模式，请使用分段请求计划")
-        return dict(plan["segments"][0]["request"])
+        return {"segments": planned}
 
     @staticmethod
     def _request_plan_item(
@@ -404,7 +349,7 @@ class SeedanceWorkspaceService:
         prompt: str,
         video_url: str,
         image_urls: list[str],
-        segment: dict[str, Any] | None,
+        segment: dict[str, Any],
     ) -> dict[str, Any]:
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt},
@@ -419,15 +364,11 @@ class SeedanceWorkspaceService:
             for url in image_urls
         )
         return {
-            "segment": (
-                {
-                    "segment_id": int(segment["segment_id"]),
-                    "start_ms": int(segment["start_ms"]),
-                    "end_ms": int(segment["end_ms"]),
-                }
-                if segment
-                else None
-            ),
+            "segment": {
+                "segment_id": int(segment["segment_id"]),
+                "start_ms": int(segment["start_ms"]),
+                "end_ms": int(segment["end_ms"]),
+            },
             "request": {
                 "model": model,
                 "content": content,
@@ -1176,11 +1117,7 @@ class SeedanceWorkspaceService:
                 "未配置 ARK_API_KEY；请求已保存在工作台，但不会提交或产生费用"
             )
         workspace = self.get_workspace(analysis_id)["workspace"]
-        if (
-            workspace
-            and workspace.get("generation_mode") == "segment_with_anchor"
-            and segment_id is None
-        ):
+        if workspace and segment_id is None:
             raise SeedanceWorkspaceError("请明确选择一个分段后再提交；分段模式不会批量提交")
         try:
             plan = await self.build_request_plan(analysis_id, segment_id)
@@ -1193,18 +1130,13 @@ class SeedanceWorkspaceService:
         planned_segments = plan["segments"]
         if not planned_segments:
             raise SeedanceWorkspaceError("没有可提交的 Seedance 分段")
-        if plan["mode"] == "segment_with_anchor":
-            segments = planned_segments
-        else:
-            if segment_id is not None:
-                raise SeedanceWorkspaceError("整段原视频模式不支持选择分段")
-            segments = planned_segments
+        segments = planned_segments
         for item in segments:
             request_payload = item["request"]
-            segment = item.get("segment")
+            segment = item["segment"]
             local_task_id = uuid4().hex
             now = int(time.time())
-            operation = "seedance.submit.segment" if segment else "seedance.submit"
+            operation = "seedance.submit.segment"
             self._log_ark_request(operation, analysis_id, self.api_url, request_payload)
             try:
                 async with httpx.AsyncClient(timeout=60) as client:
@@ -1329,24 +1261,6 @@ class SeedanceWorkspaceService:
                     now,
                 ),
             )
-
-    @staticmethod
-    def _collect_reference_file_ids(bindings: list[dict[str, Any]]) -> list[str]:
-        references: list[str] = []
-        for binding in bindings:
-            if not isinstance(binding, dict) or not binding.get("enabled"):
-                continue
-            assets = binding.get("assets", [])
-            if not isinstance(assets, list):
-                continue
-            for asset in sorted(assets, key=lambda item: int(item.get("slot_index", 0)) if isinstance(item, dict) else 0):
-                if not isinstance(asset, dict):
-                    continue
-                file_id = str(asset.get("file_id") or "")
-                if not file_id:
-                    continue
-                references.append(file_id)
-        return references
 
     async def upload_file(self, analysis_id: str, upload: Any) -> dict[str, Any]:
         filename = str(getattr(upload, "filename", "") or "upload")
@@ -1557,8 +1471,6 @@ class SeedanceWorkspaceService:
         return {
             "analysis_id": row["analysis_id"],
             "model": row["model"],
-            "generation_mode": row["generation_mode"],
-            "source_video_file_id": row["source_video_file_id"],
             "prompt": row["prompt"],
             "bindings": bindings if isinstance(bindings, list) else [],
             "version": row["version"],

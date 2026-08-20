@@ -4,6 +4,7 @@ from backend.app.api.routes import (
     capabilities,
     health,
     media,
+    replication,
     resolve,
     session,
     shot_detection,
@@ -23,5 +24,6 @@ api_router.include_router(
     tags=["capabilities"],
 )
 api_router.include_router(media.router, prefix="/media", tags=["media"])
+api_router.include_router(replication.router, prefix="/replication", tags=["replication"])
 api_router.include_router(transcription.router, tags=["transcription"])
 api_router.include_router(shot_detection.router, tags=["shot-detection"])

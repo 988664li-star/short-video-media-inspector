@@ -18,13 +18,11 @@ export type CapabilityId =
   | "user-search"
   | "suggestions"
   | "live-room"
-  | "live-status"
-  | "live-messages"
   | "account-profile"
   | "following-live";
 
-export type CapabilityField = "awemeId" | "commentId" | "secUserId" | "userId" | "mixId" | "folderId" | "keyword" | "query" | "roomId" | "userUniqueId";
-export type CapabilityResultKind = "posts" | "comments" | "users" | "folders" | "music" | "words" | "live" | "live-list" | "raw";
+export type CapabilityField = "awemeId" | "commentId" | "secUserId" | "userId" | "mixId" | "folderId" | "keyword" | "query" | "roomId";
+type CapabilityResultKind = "posts" | "comments" | "users" | "folders" | "music" | "words" | "live" | "live-list";
 
 export interface CapabilityDefinition {
   id: CapabilityId;
@@ -46,7 +44,6 @@ export const FIELD_META: Record<CapabilityField, { label: string; placeholder: s
   keyword: { label: "作品关键词", placeholder: "搜索该用户发布的作品" },
   query: { label: "搜索词", placeholder: "输入关键词获取联想词" },
   roomId: { label: "直播间/用户 ID", placeholder: "直播 room_id 或用户 uid" },
-  userUniqueId: { label: "直播访客 ID", placeholder: "user_unique_id" },
 };
 
 export const CAPABILITIES: CapabilityDefinition[] = [
@@ -63,15 +60,13 @@ export const CAPABILITIES: CapabilityDefinition[] = [
   { id: "folders", group: "我的账号", title: "收藏夹", description: "读取当前账号创建的收藏夹。", fields: [], resultKind: "folders", loginRequired: true },
   { id: "folder-posts", group: "我的账号", title: "收藏夹作品", description: "读取指定收藏夹中的作品。", fields: ["folderId"], resultKind: "posts", loginRequired: true },
   { id: "music", group: "我的账号", title: "收藏音乐", description: "读取当前账号收藏的音乐并播放。", fields: [], resultKind: "music", loginRequired: true },
-  { id: "account-profile", group: "我的账号", title: "登录环境", description: "验证 Cookie 并读取 F2 返回的当前登录标识。", fields: [], resultKind: "users", loginRequired: true },
+  { id: "account-profile", group: "我的账号", title: "当前账号", description: "验证登录状态并读取当前账号的公开资料。", fields: [], resultKind: "users", loginRequired: true },
   { id: "recommended-feed", group: "内容流", title: "推荐作品", description: "获取抖音推荐 Feed。", fields: [], resultKind: "posts" },
   { id: "following-feed", group: "内容流", title: "关注作品", description: "获取登录账号关注的作品流。", fields: [], resultKind: "posts", loginRequired: true },
   { id: "friends-feed", group: "内容流", title: "朋友作品", description: "获取登录账号的朋友作品流。", fields: [], resultKind: "posts", loginRequired: true },
   { id: "user-search", group: "搜索", title: "用户内搜索", description: "在指定用户主页作品中搜索。", fields: ["secUserId", "keyword"], resultKind: "posts" },
   { id: "suggestions", group: "搜索", title: "搜索联想", description: "获取抖音搜索推荐词。", fields: ["query"], resultKind: "words" },
   { id: "live-room", group: "直播", title: "直播间信息", description: "获取标题、主播、封面和可用流地址。", fields: ["roomId"], resultKind: "live" },
-  { id: "live-status", group: "直播", title: "用户直播状态", description: "根据用户 UID 查询是否正在直播。", fields: ["roomId"], resultKind: "raw" },
-  { id: "live-messages", group: "直播", title: "弹幕握手数据", description: "获取弹幕 WebSocket 所需的消息、游标与扩展参数。", fields: ["roomId", "userUniqueId"], resultKind: "raw" },
   { id: "following-live", group: "直播", title: "关注直播", description: "获取当前账号关注且正在直播的用户。", fields: [], resultKind: "live-list", loginRequired: true },
 ];
 

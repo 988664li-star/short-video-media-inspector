@@ -6,7 +6,7 @@ import type { InspectorData } from "../types/douyin";
 import { useTranscription } from "./useTranscription";
 
 
-export const DEFAULT_SHARE_TEXT = "2.56 eBG:/ J@V.lP :0pm 03/23 6月29日素材突出展示 有粉丝问，口播里有素材需要突出展示，需要怎么排版？素材怎么高亮显示？今天一个视频讲清楚。# 视频剪辑# 素材 # 口播 # 剪辑教程  https://v.douyin.com/ABsTdyaUZLA/ 复制此链接，打开Dou音搜索，直接观看视频！";
+const DEFAULT_SHARE_TEXT = "2.56 eBG:/ J@V.lP :0pm 03/23 6月29日素材突出展示 有粉丝问，口播里有素材需要突出展示，需要怎么排版？素材怎么高亮显示？今天一个视频讲清楚。# 视频剪辑# 素材 # 口播 # 剪辑教程  https://v.douyin.com/ABsTdyaUZLA/ 复制此链接，打开Dou音搜索，直接观看视频！";
 const INSPECTOR_SESSION_KEY = "f2.inspector.last-work";
 
 interface SavedInspectorSession {
@@ -33,7 +33,7 @@ function loadSavedInspectorSession(): SavedInspectorSession | null {
   }
 }
 
-export interface ResolveOptions {
+interface ResolveOptions {
   shareText?: string;
   awemeId?: string;
   scrollToResult?: boolean;

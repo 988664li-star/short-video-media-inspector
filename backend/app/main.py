@@ -9,11 +9,11 @@ from backend.app.core.config import settings
 from backend.app.dependencies import (
     cookie_store,
     media_registry,
+    replica_project_service,
     seedance_workspace_service,
     shot_detection_service,
     transcription_service,
 )
-from backend.app.services.session import remove_cookie_file
 
 
 async def _privacy_cleanup_loop() -> None:
@@ -27,9 +27,8 @@ async def _privacy_cleanup_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Remove data left behind by older versions before serving any request.
-    await asyncio.to_thread(remove_cookie_file, settings.cookie_store_path)
     await asyncio.to_thread(transcription_service.clear_cache)
+    await asyncio.to_thread(replica_project_service.initialize)
     await asyncio.to_thread(seedance_workspace_service.initialize)
     cleanup_task = asyncio.create_task(_privacy_cleanup_loop())
     try:

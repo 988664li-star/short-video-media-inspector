@@ -38,16 +38,10 @@ async def save_cookie(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
-        ) from exc
     return {
         **session_status,
         "message": (
             "登录 Cookie 仅保存在当前服务内存，重启或清除登录态后会自动删除"
-            if session_status["storage"] == "memory"
-            else "登录 Cookie 已保存到本机后端私有文件，重启后仍会载入"
             if session_status["has_login_markers"]
             else "Cookie 已载入，但未发现常见登录字段，请确认复制完整"
         ),
@@ -60,12 +54,7 @@ async def clear_cookie(
     media_registry: MediaRegistryDependency,
     transcription_service: TranscriptionServiceDependency,
 ) -> dict[str, Any]:
-    try:
-        cookie_store.clear()
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
-        ) from exc
+    cookie_store.clear()
     media_registry.clear()
     await asyncio.to_thread(transcription_service.clear_cache)
     return {

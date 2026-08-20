@@ -7,7 +7,6 @@ import { CommentsPanel } from "../inspector/comments/CommentsPanel";
 import { MediaList } from "../inspector/aweme/MediaList";
 import { formatCount, formatDuration } from "../../lib/formatters";
 import { useInfiniteScroll } from "../../hooks/useInfiniteScroll";
-import { copyText } from "../../lib/clipboard";
 import type {
   AwemeSummary,
   CollectedMusic,
@@ -62,7 +61,7 @@ function MusicResults({ items }: { items: CollectedMusic[] }) {
       {items.map((item, index) => (
         <article key={item.id || index} className="music-card">
           {item.cover ? <img src={item.cover.proxy_url} alt="" loading="lazy" /> : null}
-          <div><strong>{item.title}</strong><span>{item.author || "未知音乐人"} · {formatDuration((item.duration_seconds || 0) * 1000)}</span>{item.audio ? <audio src={item.audio.proxy_url} controls preload="none" /> : <p>接口未返回可播放地址</p>}</div>
+          <div><strong>{item.title}</strong><span>{item.author || "未知音乐人"} · {formatDuration((item.duration_seconds || 0) * 1000)}</span>{item.audio ? <audio src={item.audio.proxy_url} controls preload="none" /> : <p>暂无可播放音频</p>}</div>
         </article>
       ))}
     </div>
@@ -92,16 +91,16 @@ export function CapabilityResults(props: CapabilityResultsProps) {
     hasMore && !loading && !loadingMore && !error,
     onLoadMore,
   );
-  if (loading) return <div className="capability-results"><PanelState type="loading" title="正在调用 F2 能力" description="正在请求并整理抖音接口返回数据。" /></div>;
+  if (loading) return <div className="capability-results"><PanelState type="loading" title="正在获取数据" description="正在请求并整理可展示的抖音数据。" /></div>;
   if (!output) return <div className="capability-results"><PanelState type="empty" title={error ? "调用失败" : "等待自动获取"} description={error || "选择能力或补全参数后，数据会自动显示在这里。"} /></div>;
   const items = output.items;
 
   return (
     <div className="capability-results">
-      <div className="capability-results__heading"><div><h2>调用结果</h2><p>当前累计返回 {items.length} 项</p></div><Button variant="secondary" onClick={() => void copyText(JSON.stringify(output.payload, null, 2))}>复制 JSON</Button></div>
+      <div className="capability-results__heading"><div><h2>获取结果</h2><p>当前累计返回 {items.length} 项</p></div></div>
       <div ref={scrollContainer} className="capability-results__scroll scroll-surface" tabIndex={0} aria-label="能力调用结果，可向下滚动加载更多">
         {error ? <p className="inline-message inline-message--error">{error}</p> : null}
-        {!items.length ? <p className="panel-empty">接口调用成功，但没有返回可展示的数据。</p> : null}
+        {!items.length ? <p className="panel-empty">获取完成，但没有可展示的数据。</p> : null}
         {output.kind === "posts" ? <MediaList items={items as AwemeSummary[]} onInspect={onInspect} /> : null}
         {output.kind === "comments" ? <CommentsPanel items={items as CommentItem[]} onOpenUser={onOpenUser} /> : null}
         {output.kind === "users" ? <UserResults items={items as UserSummary[]} onOpenUser={onOpenUser} /> : null}
@@ -109,7 +108,6 @@ export function CapabilityResults(props: CapabilityResultsProps) {
         {output.kind === "music" ? <MusicResults items={items as CollectedMusic[]} /> : null}
         {output.kind === "words" ? <div className="word-cloud">{(items as string[]).map((word) => <span key={word}>{word}</span>)}</div> : null}
         {output.kind === "live" || output.kind === "live-list" ? <div className="live-grid">{(items as LiveRoomInfo[]).map((room, index) => <LiveCard key={room.room_id || index} room={room} onOpenUser={onOpenUser} />)}</div> : null}
-        {output.kind === "raw" ? <pre className="raw-json">{JSON.stringify(output.payload, null, 2)}</pre> : null}
         <div ref={sentinel} className="capability-pagination" aria-live="polite">
           {loadingMore ? <><span className="loading-ring loading-ring--small" /><p>正在自动加载下一页…</p></> : null}
           {!loadingMore && !error && hasMore ? <p>继续向下滚动加载更多</p> : null}

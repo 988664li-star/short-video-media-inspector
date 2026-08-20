@@ -64,8 +64,6 @@ class SeedanceWorkspaceRequest(StrictRequest):
         "doubao-seedance-2-0-260128",
         "doubao-seedance-2-0-fast-260128",
     ] = "doubao-seedance-2-0-mini-260615"
-    generation_mode: Literal["segment_with_anchor", "whole_video"] = "segment_with_anchor"
-    source_video_file_id: str = Field(default="", max_length=128)
     prompt: str = Field(default="", max_length=12_000)
     bindings: list[SeedanceReplacementBindingRequest] = Field(default_factory=list, max_length=12)
 
@@ -82,6 +80,28 @@ class SeedanceAnchorImageBindingRequest(StrictRequest):
 
 class SeedanceTaskSubmitRequest(StrictRequest):
     segment_id: int | None = Field(default=None, ge=1, le=999)
+
+
+class ReplicaProjectRequest(StrictRequest):
+    id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    name: str = Field(min_length=2, max_length=80)
+    product_name: str = Field(min_length=2, max_length=160)
+    platform: Literal["douyin", "tiktok"]
+    market: str = Field(min_length=2, max_length=80)
+    audience: str = Field(min_length=2, max_length=300)
+    landing_page: str = Field(default="", max_length=500)
+    target_cpa: float | None = Field(default=None, gt=0, le=1_000_000)
+    brand_facts: str = Field(min_length=2, max_length=4_000)
+    prohibited_claims: str = Field(default="", max_length=2_000)
+    rights_mode: Literal["structure", "licensed_v2v"] = "structure"
+    rights_confirmed: bool
+    aigc_label_required: bool = True
+
+    @model_validator(mode="after")
+    def validate_rights(self) -> "ReplicaProjectRequest":
+        if not self.rights_confirmed:
+            raise ValueError("请确认拥有参考素材或其可复用结构的合法使用权")
+        return self
 
 
 class CookieRequest(StrictRequest):

@@ -72,9 +72,8 @@ export function CookiePanel({
         </div>
         <div className={`inline-message inline-message--${tone}`} role="status">{message}</div>
         <p className="privacy-note">
-          Cookie 仅保存在当前服务内存中，重启后自动清除，不会写入解析结果、日志或本机文件。点击“清除登录态”可立即删除。
+          Cookie 仅用于当前会话，结束后自动清除，不会写入解析结果或持久保存。点击“清除登录态”可立即删除。
         </p>
-        {status.storage_error ? <p className="inline-message inline-message--error">{status.storage_error}</p> : null}
       </div>
     </details>
   );

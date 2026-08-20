@@ -9,8 +9,6 @@ import {
   getFeed,
   getFollowingLive,
   getLiveRoom,
-  getLiveMessages,
-  getLiveStatus,
   getRelatedPosts,
   getSuggestions,
   getUserContent,
@@ -74,11 +72,6 @@ export function useCapabilityRunner() {
         const payload = await getLiveRoom(values.roomId);
         return { kind: "live" as const, payload: payload as unknown as Record<string, unknown>, items: [payload.live] };
       }
-      case "live-status": {
-        const payload = await getLiveStatus(values.roomId);
-        return pageOutput("raw", payload);
-      }
-      case "live-messages": return pageOutput("raw", await getLiveMessages(values.roomId, values.userUniqueId));
       case "account-profile": {
         const payload = await getAccountProfile();
         return { kind: "users" as const, payload: payload as unknown as Record<string, unknown>, items: [payload.profile] };

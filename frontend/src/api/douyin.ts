@@ -75,10 +75,10 @@ export const getUserPosts = (secUserId: string, maxCursor: number) => apiRequest
   "更多作品获取失败",
 );
 
-export type UserContentKind = "posts" | "likes" | "mix";
-export type ConnectionKind = "following" | "followers";
-export type LibraryKind = "collections" | "folders" | "folder_posts" | "music";
-export type FeedKind = "recommended" | "following" | "friends";
+type UserContentKind = "posts" | "likes" | "mix";
+type ConnectionKind = "following" | "followers";
+type LibraryKind = "collections" | "folders" | "folder_posts" | "music";
+type FeedKind = "recommended" | "following" | "friends";
 
 const postCapability = <T>(path: string, body: Record<string, unknown>, fallback: string) =>
   apiRequest<T>(path, { method: "POST", body: JSON.stringify(body) }, fallback);

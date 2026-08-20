@@ -33,7 +33,6 @@ const INITIAL_VALUES: CapabilityValues = {
   keyword: "",
   query: "视频剪辑",
   roomId: "",
-  userUniqueId: "",
 };
 
 export function CapabilityCenter({ session, onInspect, onOpenUser }: CapabilityCenterProps) {
@@ -79,7 +78,7 @@ export function CapabilityCenter({ session, onInspect, onOpenUser }: CapabilityC
   return (
     <section className="capability-center">
       <div className="capability-intro panel">
-        <div><span className="capability-eyebrow">F2 · DouyinCrawler</span><h2>抖音能力中心</h2><p>把公开能力与登录能力统一成可分页、可预览、可继续解析的操作面板。</p></div>
+        <div><span className="capability-eyebrow">公开内容与账号数据</span><h2>抖音能力中心</h2><p>把公开能力与登录能力统一成可分页、可预览、可继续解析的操作面板。</p></div>
         <span className="capability-count">{CAPABILITIES.length} 项能力</span>
       </div>
       <CookiePanel {...session} onSave={session.save} onClear={session.clear} />

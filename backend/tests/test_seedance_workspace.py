@@ -26,7 +26,6 @@ def make_service(tmp_path):
 def workspace_payload():
     return {
         "model": "doubao-seedance-2-0-mini-260615",
-        "source_video_file_id": "file-source-video",
         "prompt": "只替换 @image_1 指向的产品。",
         "bindings": [{
             "candidate_id": "product_01",
@@ -44,60 +43,16 @@ def test_workspace_persists_ark_file_bindings_and_prompt(tmp_path):
     saved = service.save_workspace(ANALYSIS_ID, workspace_payload())
 
     workspace = saved["workspace"]
-    assert workspace["source_video_file_id"] == "file-source-video"
+    assert workspace["model"] == "doubao-seedance-2-0-mini-260615"
     assert workspace["bindings"][0]["assets"][1]["file_id"] == "file-product-lit"
     assert make_service(tmp_path).get_workspace(ANALYSIS_ID)["workspace"] == workspace
-
-
-@pytest.mark.asyncio
-async def test_seedance_request_resolves_files_to_video_and_image_reference_roles(tmp_path, monkeypatch):
-    service = make_service(tmp_path)
-    payload = workspace_payload()
-    payload["prompt"] = "局部替换产品，不改变镜头。"
-    service.save_workspace(ANALYSIS_ID, payload)
-
-    async def resolve(_analysis_id, file_id, _label):
-        return f"https://download.example/{file_id}"
-
-    monkeypatch.setattr(service, "_resolve_file_download_url", resolve)
-    request = await service.build_request(ANALYSIS_ID)
-
-    assert request["model"] == "doubao-seedance-2-0-mini-260615"
-    assert request["generate_audio"] is False
-    assert request["content"] == [
-        {"type": "text", "text": "局部替换产品，不改变镜头。"},
-        {"type": "video_url", "role": "reference_video", "video_url": {"url": "https://download.example/file-source-video"}},
-        {"type": "image_url", "role": "reference_image", "image_url": {"url": "https://download.example/file-product-main"}},
-        {"type": "image_url", "role": "reference_image", "image_url": {"url": "https://download.example/file-product-lit"}},
-    ]
-
-
-@pytest.mark.asyncio
-async def test_seedance_request_uses_the_saved_model_without_changing_other_parameters(tmp_path, monkeypatch):
-    service = make_service(tmp_path)
-    payload = workspace_payload()
-    payload["model"] = "doubao-seedance-2-0-fast-260128"
-    service.save_workspace(ANALYSIS_ID, payload)
-
-    async def resolve(_analysis_id, file_id, _label):
-        return f"https://download.example/{file_id}"
-
-    monkeypatch.setattr(service, "_resolve_file_download_url", resolve)
-    request = await service.build_request(ANALYSIS_ID)
-
-    assert request["model"] == "doubao-seedance-2-0-fast-260128"
-    assert request["duration"] == -1
-    assert request["ratio"] == "adaptive"
-    assert request["generate_audio"] is False
-    assert request["watermark"] is False
 
 
 @pytest.mark.asyncio
 async def test_segment_plan_uses_one_merged_anchor_as_its_only_reference_image(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     payload = workspace_payload()
-    payload["generation_mode"] = "segment_with_anchor"
-    payload["source_video_file_id"] = ""
+    payload["model"] = "doubao-seedance-2-0-fast-260128"
     service.save_workspace(ANALYSIS_ID, payload)
 
     async def resolve(_analysis_id, file_id, _label):
@@ -124,10 +79,14 @@ async def test_segment_plan_uses_one_merged_anchor_as_its_only_reference_image(t
 
     plan = await service.build_request_plan(ANALYSIS_ID)
 
-    assert plan["mode"] == "segment_with_anchor"
     item = plan["segments"][0]
     assert item["segment"] == {"segment_id": 1, "start_ms": 0, "end_ms": 8770}
     content = item["request"]["content"]
+    assert item["request"]["model"] == "doubao-seedance-2-0-fast-260128"
+    assert item["request"]["duration"] == -1
+    assert item["request"]["ratio"] == "adaptive"
+    assert item["request"]["generate_audio"] is False
+    assert item["request"]["watermark"] is False
     assert content[1]["video_url"]["url"] == "https://download.example/file-segment-01"
     assert content[-1]["image_url"]["url"] == "https://download.example/file-segment-anchor-01"
     assert "@图片1 是该分段全部镜头合并后的最终视觉锚点图" in content[0]["text"]
@@ -137,7 +96,6 @@ async def test_segment_plan_uses_one_merged_anchor_as_its_only_reference_image(t
 async def test_user_processed_image_can_be_bound_as_a_segment_anchor(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     payload = workspace_payload()
-    payload["generation_mode"] = "segment_with_anchor"
     service.save_workspace(ANALYSIS_ID, payload)
 
     async def refresh(_analysis_id, file_id):

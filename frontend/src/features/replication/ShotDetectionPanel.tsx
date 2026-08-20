@@ -1,5 +1,5 @@
-import { Clapperboard, LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Boxes, Clapperboard, LoaderCircle } from "lucide-react";
+import { useEffect } from "react";
 
 import { Button } from "../../components/ui/Button";
 import { getSavedShotAnalysisState } from "../../api/shotDetection";
@@ -9,14 +9,11 @@ import { useStoryboardScript } from "../../hooks/useStoryboardScript";
 import type { InspectorData } from "../../types/douyin";
 import { AutoShotList } from "./AutoShotList";
 import { ReplicaPlaybookPanel } from "./ReplicaPlaybookPanel";
-import { StoryboardScriptPanel } from "./StoryboardScriptPanel";
 
 interface ShotDetectionPanelProps {
   data: InspectorData;
   onSeek: (seconds: number) => void;
 }
-
-type ReplicaTab = "shots" | "storyboard-script" | "playbook";
 
 function savedAnalysisStorageKey(awemeId: string) {
   return `f2.replication.analysis-id:${awemeId}`;
@@ -26,7 +23,6 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
   const detector = useShotDetection();
   const playbook = useReplicaPlaybook();
   const storyboardScript = useStoryboardScript();
-  const [activeTab, setActiveTab] = useState<ReplicaTab>("shots");
   const mediaUrl = data.video?.proxy_url ?? "";
   const result = detector.result;
   const storageKey = savedAnalysisStorageKey(data.aweme_id);
@@ -35,7 +31,6 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
     detector.reset();
     playbook.reset();
     storyboardScript.reset();
-    setActiveTab("shots");
     const savedAnalysisId = window.localStorage.getItem(storageKey);
     if (!savedAnalysisId) return undefined;
 
@@ -47,23 +42,11 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
         storyboardScript.restore(savedState.storyboard_script);
         playbook.restore(savedState.replica_playbook);
       })
-      .catch(() => {
-        // The server may have expired its cache. Do not show a false failure or start work again.
-        window.localStorage.removeItem(storageKey);
-      });
+      .catch(() => window.localStorage.removeItem(storageKey));
     return () => {
       disposed = true;
     };
-  }, [
-    detector.reset,
-    detector.restore,
-    mediaUrl,
-    playbook.reset,
-    playbook.restore,
-    storageKey,
-    storyboardScript.reset,
-    storyboardScript.restore,
-  ]);
+  }, [detector.reset, detector.restore, mediaUrl, playbook.reset, playbook.restore, storageKey, storyboardScript.reset, storyboardScript.restore]);
 
   useEffect(() => {
     if (result?.analysis_id)
@@ -72,56 +55,83 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
 
   if (!mediaUrl) return null;
 
-  const startDetection = () => {
+  const startDetection = async () => {
     playbook.reset();
     storyboardScript.reset();
-    setActiveTab("shots");
-    void detector.detect(data.aweme_id, mediaUrl).then((nextResult) => {
-      if (nextResult)
-        window.localStorage.setItem(storageKey, nextResult.analysis_id);
-    });
+    const nextResult = await detector.detect(data.aweme_id, mediaUrl);
+    if (nextResult) window.localStorage.setItem(storageKey, nextResult.analysis_id);
   };
 
-  const analysisContext = data.description || data.caption || "";
-  const startStoryboardScript = () => {
+  const startProductAnalysis = async () => {
     if (!result) return;
-    playbook.reset();
-    void storyboardScript.build(result.analysis_id, analysisContext, storyboardScript.result !== null);
+    const script = storyboardScript.result
+      ?? await storyboardScript.build(result.analysis_id, data.description || data.caption || "");
+    if (!script) return;
+    await playbook.build(result.analysis_id);
   };
+
+  const analyzingProducts = storyboardScript.loading || playbook.loading;
+  const analysisError = storyboardScript.error || playbook.error;
 
   return (
     <section className="shot-detection panel" aria-labelledby="shot-detection-heading">
       <div className="shot-detection__heading">
         <div>
-          <h3 id="shot-detection-heading">自动分镜</h3>
-          <p>下载的视频会集中保存在服务端的分镜目录，识别结果可直接定位参考视频。</p>
+          <h3 id="shot-detection-heading">商品替换工作流</h3>
+          <p>先拆出镜头，再确认商品和它出现的时间段；系统不会替换其他对象。</p>
         </div>
         <Button
           variant="primary"
           disabled={detector.loading}
-          onClick={startDetection}
+          onClick={() => void startDetection()}
           icon={detector.loading ? <LoaderCircle className="spin" /> : <Clapperboard />}
         >
-          {detector.loading ? "正在识别" : "识别分镜"}
+          {detector.loading ? "正在理解视频" : result ? "重新识别镜头" : "开始识别镜头"}
         </Button>
       </div>
 
       {detector.error ? <p className="shot-detection__message shot-detection__message--error" role="alert">{detector.error}</p> : null}
-      {detector.loading ? <p className="shot-detection__message">正在下载并分析视频，请稍候。</p> : null}
+      {detector.loading ? <p className="shot-detection__message">正在提取视频并识别镜头，请稍候。</p> : null}
 
       {result ? (
-        <>
-          <div className="shot-detection__tabs" role="tablist" aria-label="爆款复刻分析结果">
-            <button type="button" role="tab" aria-selected={activeTab === "shots"} className={activeTab === "shots" ? "shot-detection__tab shot-detection__tab--active" : "shot-detection__tab"} onClick={() => setActiveTab("shots")}>自动分镜</button>
-            <button type="button" role="tab" aria-selected={activeTab === "storyboard-script"} className={activeTab === "storyboard-script" ? "shot-detection__tab shot-detection__tab--active" : "shot-detection__tab"} onClick={() => setActiveTab("storyboard-script")}>分段分镜脚本</button>
-            <button type="button" role="tab" aria-selected={activeTab === "playbook"} className={activeTab === "playbook" ? "shot-detection__tab shot-detection__tab--active" : "shot-detection__tab"} onClick={() => setActiveTab("playbook")}>替换方案</button>
-          </div>
-          <div className="shot-detection__content" role="tabpanel">
-            {activeTab === "shots" ? <AutoShotList result={result} onSeek={onSeek} /> : null}
-            {activeTab === "storyboard-script" ? <StoryboardScriptPanel shotResult={result} result={storyboardScript.result} loading={storyboardScript.loading} error={storyboardScript.error} progressMessage={storyboardScript.progressMessage} onBuild={startStoryboardScript} /> : null}
-            {activeTab === "playbook" ? <ReplicaPlaybookPanel result={playbook.result} storyboardScript={storyboardScript.result} sourceAssetBaseUrl={result.asset_base_url} canBuild={storyboardScript.result !== null} loading={playbook.loading} error={playbook.error} onBuild={() => void playbook.build(result.analysis_id)} /> : null}
-          </div>
-        </>
+        <div className="local-replacement-flow">
+          <section className="local-replacement-flow__step">
+            <div className="local-replacement-flow__step-heading">
+              <div>
+                <span>1</span>
+                <div><h4>确认镜头范围</h4><p>已识别的镜头可点击定位回参考视频。</p></div>
+              </div>
+            </div>
+            <AutoShotList result={result} onSeek={onSeek} />
+          </section>
+
+          <section className="local-replacement-flow__step">
+            <div className="local-replacement-flow__step-heading">
+              <div>
+                <span>2</span>
+                <div><h4>识别可替换商品</h4><p>系统会在后台理解镜头与商品，不要求你查看分镜脚本。</p></div>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={analyzingProducts}
+                onClick={() => void startProductAnalysis()}
+                icon={analyzingProducts ? <LoaderCircle className="spin" /> : <Boxes />}
+              >
+                {analyzingProducts ? "正在识别商品" : playbook.result ? "重新识别商品" : "识别可替换商品"}
+              </Button>
+            </div>
+            {analyzingProducts ? <p className="shot-detection__message">{storyboardScript.progressMessage || "正在理解镜头中的商品和交互关系。"}</p> : null}
+            {analysisError ? <p className="shot-detection__message shot-detection__message--error" role="alert">{analysisError}</p> : null}
+          </section>
+
+          {playbook.result ? (
+            <ReplicaPlaybookPanel
+              result={playbook.result}
+              storyboardScript={storyboardScript.result}
+              sourceAssetBaseUrl={result.asset_base_url}
+            />
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

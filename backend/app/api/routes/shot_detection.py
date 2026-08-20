@@ -5,7 +5,7 @@ import json
 import re
 from typing import Annotated, Any, AsyncIterator
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.app.dependencies import (
@@ -185,23 +185,6 @@ def save_seedance_workspace(
 ) -> dict[str, Any]:
     try:
         return service.save_workspace(analysis_id, request.model_dump())
-    except SeedanceWorkspaceError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.get("/shot-detection/{analysis_id}/seedance-request-preview")
-async def preview_seedance_request(
-    analysis_id: str,
-    service: Annotated[SeedanceWorkspaceService, Depends(get_seedance_workspace_service)],
-    segment_id: int | None = Query(default=None, ge=1, le=999),
-) -> dict[str, Any]:
-    """Build the exact generation body without sending it to Seedance."""
-    try:
-        return {"plan": await service.build_request_plan(analysis_id, segment_id)}
-    except SeedanceConfigurationError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except SeedanceProviderError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except SeedanceWorkspaceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

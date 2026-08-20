@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 
+import { LocalReplacementHeader } from "../features/replication/LocalReplacementHeader";
 import { ShotDetectionPanel } from "../features/replication/ShotDetectionPanel";
 import { ViralRemixCenter } from "../features/replication/ViralRemixCenter";
 import type { InspectorController } from "../hooks/useInspector";
@@ -20,6 +21,7 @@ export function ReplicationPage({ inspector, onReset }: ReplicationPageProps) {
 
   return (
     <div className="replication-page">
+      <LocalReplacementHeader />
       <ViralRemixCenter
         data={inspector.data}
         shareText={inspector.shareText}
@@ -34,7 +36,7 @@ export function ReplicationPage({ inspector, onReset }: ReplicationPageProps) {
         videoRef={videoRef}
       >
         {inspector.data?.video ? (
-          <aside className="replication-analysis-sidebar" aria-label="分镜分析">
+          <aside className="replication-analysis-sidebar" aria-label="商品替换工作台">
             <ShotDetectionPanel data={inspector.data} onSeek={seekToShot} />
           </aside>
         ) : null}

@@ -16,10 +16,12 @@ export function useReplicaPlaybook() {
     try {
       const nextResult = await buildReplicaPlaybook(analysisId);
       if (requestId.current === currentRequest) setResult(nextResult);
+      return nextResult;
     } catch (requestError) {
       if (requestId.current === currentRequest) {
         setError(requestError instanceof Error ? requestError.message : "生成复刻方案失败，请稍后重试。");
       }
+      return null;
     } finally {
       if (requestId.current === currentRequest) setLoading(false);
     }

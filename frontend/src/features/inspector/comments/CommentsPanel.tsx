@@ -10,10 +10,10 @@ interface CommentsPanelProps {
 }
 
 export function CommentsPanel({ items, total, onOpenUser }: CommentsPanelProps) {
-  if (!items.length) return <p className="panel-empty">评论接口没有返回公开评论。</p>;
+  if (!items.length) return <p className="panel-empty">暂无可展示的公开评论。</p>;
   return (
     <div>
-      <p className="comments-header">接口返回 {items.length} 条 · 作品评论总数 {formatCount(total)}</p>
+      <p className="comments-header">已加载 {items.length} 条 · 作品评论总数 {formatCount(total)}</p>
       <div className="comment-list">
         {items.map((comment) => (
           <article className="comment-item" key={comment.id}>

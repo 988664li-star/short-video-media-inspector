@@ -14,7 +14,7 @@ from backend.app.services.session import LoginCookieStore
 
 @pytest.fixture(autouse=True)
 def isolated_services(tmp_path):
-    cookie_store = LoginCookieStore(tmp_path / "douyin_cookie.json")
+    cookie_store = LoginCookieStore()
     media_registry = MediaRegistry()
     app.dependency_overrides[get_cookie_store] = lambda: cookie_store
     app.dependency_overrides[get_media_registry] = lambda: media_registry
@@ -39,8 +39,6 @@ async def test_health_and_initial_session_status(client: httpx.AsyncClient):
         "configured": False,
         "cookie_count": 0,
         "has_login_markers": False,
-        "storage": "backend_file",
-        "storage_error": None,
     }
 
 

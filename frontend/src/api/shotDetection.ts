@@ -1,11 +1,9 @@
-import { API_BASE_URL, apiRequest } from "./client";
+import { API_BASE_URL, apiRequest, publicErrorMessage } from "./client";
 import type {
   ReplicaPlaybookResult,
   ArkFile,
   SeedanceReplacementBinding,
-  SeedanceRequestPreviewResult,
   SeedanceModelId,
-  SeedanceGenerationMode,
   SeedanceAnchorImagePreviewResult,
   SeedanceWorkspaceResult,
   SavedShotAnalysisState,
@@ -42,8 +40,6 @@ export function getSavedShotAnalysisState(analysisId: string) {
 
 export interface SeedanceWorkspaceInput {
   model: SeedanceModelId;
-  generation_mode: SeedanceGenerationMode;
-  source_video_file_id: string;
   prompt: string;
   bindings: SeedanceReplacementBinding[];
 }
@@ -69,16 +65,8 @@ export async function uploadArkFile(analysisId: string, file: File) {
   const payload = (await response.json().catch(() => ({}))) as ArkFile & {
     detail?: string;
   };
-  if (!response.ok) throw new Error(payload.detail || "上传方舟素材失败");
+  if (!response.ok) throw new Error(publicErrorMessage(payload.detail, "素材上传失败"));
   return payload as ArkFile;
-}
-
-export function refreshArkFile(analysisId: string, fileId: string) {
-  return apiRequest<ArkFile>(
-    `/api/shot-detection/${analysisId}/ark-files/${fileId}/refresh`,
-    { method: "POST" },
-    "刷新方舟素材状态失败",
-  );
 }
 
 export function getSeedanceWorkspace(analysisId: string) {
@@ -97,15 +85,6 @@ export function saveSeedanceWorkspace(
     `/api/shot-detection/${analysisId}/seedance-workspace`,
     { method: "PUT", body: JSON.stringify(workspace) },
     "保存 Seedance 测试工作台失败",
-  );
-}
-
-export function previewSeedanceRequest(analysisId: string, segmentId?: number) {
-  const query = segmentId === undefined ? "" : `?segment_id=${segmentId}`;
-  return apiRequest<SeedanceRequestPreviewResult>(
-    `/api/shot-detection/${analysisId}/seedance-request-preview${query}`,
-    {},
-    "生成 Seedance 请求预览失败",
   );
 }
 
@@ -160,7 +139,7 @@ export function refreshSeedanceTask(analysisId: string, localTaskId: string) {
   );
 }
 
-export type StoryboardScriptStreamEvent =
+type StoryboardScriptStreamEvent =
   | { type: "progress"; message: string }
   | {
       type: "segment";
@@ -188,7 +167,7 @@ export async function streamStoryboardScript(
     const payload = (await response.json().catch(() => ({}))) as {
       detail?: string;
     };
-    throw new Error(payload.detail || "生成分段分镜脚本失败");
+    throw new Error(publicErrorMessage(payload.detail, "生成分段分镜脚本失败"));
   }
   if (!response.body) throw new Error("浏览器不支持流式响应");
 
@@ -201,7 +180,7 @@ export async function streamStoryboardScript(
     if (!event || !data) return;
     const payload = JSON.parse(data) as Record<string, unknown>;
     if (event === "error")
-      throw new Error(String(payload.message || "生成分段分镜脚本失败"));
+      throw new Error(publicErrorMessage(payload.message, "生成分段分镜脚本失败"));
     if (event === "progress")
       onEvent({
         type: "progress",

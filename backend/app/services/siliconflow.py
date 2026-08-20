@@ -45,13 +45,13 @@ class SiliconFlowClient:
         cls,
         settings: Settings,
         *,
-        model: str | None = None,
+        model: str,
     ) -> "SiliconFlowClient":
         return cls(
             SiliconFlowConfig(
                 api_key=settings.replica_analysis_api_key,
                 api_url=settings.replica_analysis_api_url,
-                model=model or settings.replica_analysis_model,
+                model=model,
             )
         )
 

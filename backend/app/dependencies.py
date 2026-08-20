@@ -1,5 +1,6 @@
 from backend.app.core.config import settings
 from backend.app.services.media import MediaRegistry
+from backend.app.services.replica_projects import ReplicaProjectService
 from backend.app.services.replica_analysis import (
     ReplicaPlaybookService,
     ScenePackageService,
@@ -52,6 +53,7 @@ seedance_workspace_service = SeedanceWorkspaceService(
     settings.gpt_image_edits_url,
     settings.gpt_image_model,
 )
+replica_project_service = ReplicaProjectService(settings.replica_projects_db_path)
 
 
 def get_cookie_store() -> LoginCookieStore:
@@ -88,3 +90,7 @@ def get_storyboard_script_service() -> StoryboardScriptService:
 
 def get_seedance_workspace_service() -> SeedanceWorkspaceService:
     return seedance_workspace_service
+
+
+def get_replica_project_service() -> ReplicaProjectService:
+    return replica_project_service

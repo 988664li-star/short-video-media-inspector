@@ -52,7 +52,7 @@ export function TranscriptPanel({ transcription, loading, error, onExtract }: Tr
           <LoaderCircle className="transcript-spinner" />
           <div>
             <strong>正在从音轨生成文案</strong>
-            <p>首次使用会下载 small 转写模型和中文标点模型，后续作品会直接复用。</p>
+            <p>正在处理音轨并整理时间轴，完成后会自动展示结果。</p>
           </div>
         </div>
       ) : error ? (
@@ -66,9 +66,6 @@ export function TranscriptPanel({ transcription, loading, error, onExtract }: Tr
       ) : transcription ? (
         <>
           <div className="transcript-meta">
-            <span>{transcription.model}</span>
-            {transcription.punctuation_model ? <span>{transcription.punctuation_model}</span> : null}
-            <span>{transcription.device.toUpperCase()} · {transcription.compute_type}</span>
             <span>{formatTimestamp(transcription.duration_seconds)}</span>
             <span>{transcription.source_kind === "audio" ? "独立音轨" : "视频音轨"}</span>
             <span>{transcription.cached ? "临时缓存" : `${transcription.elapsed_seconds.toFixed(1)} 秒完成`}</span>
@@ -93,7 +90,7 @@ export function TranscriptPanel({ transcription, loading, error, onExtract }: Tr
           <FileText />
           <div>
             <strong>按需生成视频文案</strong>
-            <p>点击“提取文案”后才会加载模型；文案仅作短时缓存并自动清理。</p>
+            <p>点击“提取文案”后开始处理；文案仅作短时缓存并自动清理。</p>
           </div>
         </div>
       )}

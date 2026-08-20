@@ -7,9 +7,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-DEFAULT_COOKIE_STORE_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "douyin_cookie.json"
-)
 DEFAULT_BACKEND_DATA_PATH = Path(__file__).resolve().parents[2] / "data"
 DEFAULT_BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
@@ -22,9 +19,6 @@ class Settings:
     app_name: str = "抖音媒体检查台 API"
     api_prefix: str = "/api"
     max_cookie_size: int = 48 * 1024
-    cookie_store_path: Path = Path(
-        os.environ.get("DOUYIN_COOKIE_STORE_PATH", DEFAULT_COOKIE_STORE_PATH)
-    )
     transcription_model_size: str = os.environ.get("WHISPER_MODEL_SIZE", "small")
     transcription_language: str = os.environ.get("WHISPER_LANGUAGE", "zh")
     transcription_device: str = os.environ.get("WHISPER_DEVICE", "cpu")
@@ -88,6 +82,12 @@ class Settings:
             DEFAULT_BACKEND_DATA_PATH / "replica_workspaces.sqlite3",
         )
     )
+    replica_projects_db_path: Path = Path(
+        os.environ.get(
+            "REPLICA_PROJECTS_DB_PATH",
+            DEFAULT_BACKEND_DATA_PATH / "replica_projects.sqlite3",
+        )
+    )
     seedance_api_key: str = os.environ.get("ARK_API_KEY", "")
     seedance_api_url: str = os.environ.get(
         "VOLCENGINE_ARK_CONTENT_GENERATION_URL",
@@ -137,16 +137,11 @@ class Settings:
     replica_analysis_api_url: str = os.environ.get(
         "SILICONFLOW_API_URL", "https://api.siliconflow.cn/v1/chat/completions"
     )
-    replica_analysis_model: str = os.environ.get(
-        "SILICONFLOW_MODEL", "Qwen/Qwen3.6-27B"
-    )
-    # 视觉任务和纯文本汇总可分别选模型；未单独配置文本模型时保留旧配置的兼容性。
     replica_vision_model: str = os.environ.get(
         "SILICONFLOW_VISION_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct"
     )
     replica_text_model: str = os.environ.get(
-        "SILICONFLOW_TEXT_MODEL",
-        os.environ.get("SILICONFLOW_MODEL", "Qwen/Qwen3.6-27B"),
+        "SILICONFLOW_TEXT_MODEL", "Qwen/Qwen3.6-27B"
     )
     media_session_ttl_seconds: int = int(
         os.environ.get("MEDIA_SESSION_TTL_SECONDS", str(10 * 60))

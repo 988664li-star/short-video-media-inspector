@@ -1,4 +1,4 @@
-export interface Shot {
+interface Shot {
   index: number;
   start_seconds: number;
   end_seconds: number;
@@ -8,7 +8,7 @@ export interface Shot {
   selected_frames: ShotFrame[];
 }
 
-export interface ShotFrame {
+interface ShotFrame {
   position: number;
   timestamp_seconds: number;
   path: string;
@@ -26,7 +26,7 @@ export interface ShotDetectionResult {
   asset_base_url: string;
 }
 
-export type ReplacementCandidateType =
+type ReplacementCandidateType =
   "person" | "product" | "background" | "screen" | "text" | "other";
 
 export interface ReplacementCandidate {
@@ -40,7 +40,7 @@ export interface ReplacementCandidate {
   preserve_constraints: string[];
 }
 
-export interface ReplicaPlaybook {
+interface ReplicaPlaybook {
   source_summary?: string;
   global_preserve_constraints?: string[];
   replacement_candidates?: ReplacementCandidate[];
@@ -66,8 +66,6 @@ export type SeedanceModelId =
   | "doubao-seedance-2-0-260128"
   | "doubao-seedance-2-0-fast-260128";
 
-export type SeedanceGenerationMode = "segment_with_anchor" | "whole_video";
-
 export interface SeedanceReplacementBinding {
   candidate_id: string;
   enabled: boolean;
@@ -75,11 +73,9 @@ export interface SeedanceReplacementBinding {
   assets: SeedanceReferenceAsset[];
 }
 
-export interface SeedanceWorkspace {
+interface SeedanceWorkspace {
   analysis_id: string;
   model: SeedanceModelId;
-  generation_mode: SeedanceGenerationMode;
-  source_video_file_id: string;
   prompt: string;
   bindings: SeedanceReplacementBinding[];
   version: number;
@@ -145,7 +141,7 @@ export interface SeedanceVisualAnchor {
   updated_at: number;
 }
 
-export interface SeedanceShotVisualAnchor extends SeedanceVisualAnchor {
+interface SeedanceShotVisualAnchor extends SeedanceVisualAnchor {
   shot_order: number;
   scene_id: number;
   start_ms: number;
@@ -153,7 +149,7 @@ export interface SeedanceShotVisualAnchor extends SeedanceVisualAnchor {
   source_frame_path: string;
 }
 
-export interface SeedanceAnchorImagePreviewInput {
+interface SeedanceAnchorImagePreviewInput {
   image_index: number;
   kind: "source_contact_sheet" | "target_product";
   label: string;
@@ -178,25 +174,7 @@ export interface SeedanceAnchorImagePreviewResult {
   previews: SeedanceAnchorImagePreview[];
 }
 
-export interface SeedanceRequestPlanSegment {
-  segment: {
-    segment_id: number;
-    start_ms: number;
-    end_ms: number;
-  } | null;
-  request: Record<string, unknown>;
-}
-
-export interface SeedanceRequestPlan {
-  mode: SeedanceGenerationMode;
-  segments: SeedanceRequestPlanSegment[];
-}
-
-export interface SeedanceRequestPreviewResult {
-  plan: SeedanceRequestPlan;
-}
-
-export interface StoryboardScriptShot {
+interface StoryboardScriptShot {
   order: number;
   time_range_ms: [number, number];
   title: string;
@@ -210,7 +188,7 @@ export interface StoryboardScriptShot {
   shooting_notes: string;
 }
 
-export interface StoryboardScriptSegment {
+interface StoryboardScriptSegment {
   segment_id: number;
   start_ms: number;
   end_ms: number;

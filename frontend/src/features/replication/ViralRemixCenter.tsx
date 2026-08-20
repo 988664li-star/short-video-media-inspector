@@ -1,4 +1,4 @@
-import { ChartNoAxesCombined, Clapperboard, Lightbulb, LoaderCircle, ScanLine } from "lucide-react";
+import { Boxes, Clapperboard, ImageUp, LoaderCircle, Replace, ScanLine } from "lucide-react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 import type { ContentPlatform } from "../../api/douyin";
@@ -24,18 +24,23 @@ interface ViralRemixCenterProps {
 const WORKFLOW_STEPS = [
   {
     icon: Clapperboard,
-    title: "解析原作品",
-    description: "导入参考作品，提取标题、文案、媒体与互动信息。",
+    title: "理解参考视频",
+    description: "导入已授权参考作品，识别镜头、节奏、爆点与可编辑区域。",
   },
   {
-    icon: ChartNoAxesCombined,
-    title: "拆解爆点",
-    description: "围绕选题、开场钩子、节奏与互动信号建立复刻依据。",
+    icon: Boxes,
+    title: "确认替换商品",
+    description: "只勾选要替换的商品，并确认它出现在哪些镜头中。",
   },
   {
-    icon: Lightbulb,
-    title: "生成替换提示词",
-    description: "选择画面中要替换的对象并上传参考素材，生成视频编辑模型可执行的提示词。",
+    icon: ImageUp,
+    title: "上传商品图",
+    description: "上传你的商品图；系统为各镜头准备可审核的视觉锚点。",
+  },
+  {
+    icon: Replace,
+    title: "生成替换片段",
+    description: "保持动作、机位和节奏，逐镜头生成并审核每段结果。",
   },
 ] as const;
 
@@ -61,8 +66,8 @@ export function ViralRemixCenter({
     <section className="replication-center" aria-labelledby="replication-heading">
       <section className="replication-input-panel panel">
         <div>
-          <h2 id="replication-heading">爆款复刻</h2>
-          <p>粘贴参考作品的分享文案或链接，直接提取视频，用于后续复刻拆解。</p>
+          <h2 id="replication-heading">导入参考视频</h2>
+          <p>粘贴已获得合法使用权限的参考作品。系统会理解镜头与节奏，再只替换你选中的商品。</p>
         </div>
         <div className="replication-input-actions">
           <label className="platform-select-label">

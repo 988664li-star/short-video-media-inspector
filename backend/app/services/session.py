@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
 import threading
 from typing import Any
 
@@ -17,14 +14,6 @@ LOGIN_COOKIE_NAMES = {
     "uid_tt",
     "uid_tt_ss",
 }
-
-
-def remove_cookie_file(storage_path: Path) -> None:
-    """Delete a legacy on-disk cookie when privacy-first mode starts."""
-    try:
-        storage_path.unlink(missing_ok=True)
-    except OSError as exc:
-        raise RuntimeError("旧 Cookie 文件删除失败，请检查后端数据目录权限") from exc
 
 
 def normalize_login_cookie(value: Any) -> tuple[str, list[str]]:
@@ -65,78 +54,18 @@ def normalize_login_cookie(value: Any) -> tuple[str, list[str]]:
 
 
 class LoginCookieStore:
-    """Thread-safe optional Cookie storage with an owner-only disk file."""
+    """Keep the active login Cookie in process memory only."""
 
-    def __init__(self, storage_path: Path | str | None = None) -> None:
+    def __init__(self) -> None:
         self._cookie = ""
         self._names: list[str] = []
         self._lock = threading.Lock()
-        self._storage_path = Path(storage_path) if storage_path else None
-        self._storage_error = ""
-        self._restore()
-
-    def _restore(self) -> None:
-        if self._storage_path is None:
-            return
-        try:
-            payload = json.loads(self._storage_path.read_text(encoding="utf-8"))
-            cookie, names = normalize_login_cookie(payload.get("cookie"))
-        except FileNotFoundError:
-            return
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            self._storage_error = "持久化 Cookie 文件无法读取，请重新保存或清除"
-            return
-        self._cookie = cookie
-        self._names = names
-
-    def _persist(self, cookie: str) -> None:
-        if self._storage_path is None:
-            return
-        directory = self._storage_path.parent
-        temporary_path = self._storage_path.with_suffix(
-            f"{self._storage_path.suffix}.tmp"
-        )
-        try:
-            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chmod(directory, 0o700)
-            descriptor = os.open(
-                temporary_path,
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                0o600,
-            )
-            with os.fdopen(descriptor, "w", encoding="utf-8") as file:
-                json.dump(
-                    {"version": 1, "cookie": cookie},
-                    file,
-                    ensure_ascii=True,
-                    separators=(",", ":"),
-                )
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary_path, self._storage_path)
-            os.chmod(self._storage_path, 0o600)
-        except OSError as exc:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise RuntimeError("Cookie 持久化保存失败，请检查后端数据目录权限") from exc
-
-    def _remove_persisted(self) -> None:
-        if self._storage_path is None:
-            return
-        try:
-            self._storage_path.unlink(missing_ok=True)
-        except OSError as exc:
-            raise RuntimeError("持久化 Cookie 文件删除失败") from exc
 
     def set(self, value: Any) -> dict[str, Any]:
         cookie, names = normalize_login_cookie(value)
         with self._lock:
-            self._persist(cookie)
             self._cookie = cookie
             self._names = names
-            self._storage_error = ""
         return self.status()
 
     def get(self) -> str:
@@ -145,19 +74,14 @@ class LoginCookieStore:
 
     def clear(self) -> None:
         with self._lock:
-            self._remove_persisted()
             self._cookie = ""
             self._names = []
-            self._storage_error = ""
 
     def status(self) -> dict[str, Any]:
         with self._lock:
             names = list(self._names)
-            storage_error = self._storage_error
         return {
             "configured": bool(names),
             "cookie_count": len(names),
             "has_login_markers": bool(LOGIN_COOKIE_NAMES.intersection(names)),
-            "storage": "backend_file" if self._storage_path else "memory",
-            "storage_error": storage_error or None,
         }
