@@ -21,6 +21,7 @@ class SceneAssetExporter:
         job_path: Path,
         shots: list[dict[str, Any]],
     ) -> None:
+        source_duration = self._source_duration(source_path)
         for shot in shots:
             scene_dir = job_path / f"scene_{int(shot['index']):03d}"
             scene_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -37,6 +38,7 @@ class SceneAssetExporter:
                 scene_dir,
                 float(shot["start_seconds"]),
                 float(shot["duration_seconds"]),
+                source_duration,
             )
             scene_prefix = scene_dir.relative_to(job_path).as_posix()
             for key in ("candidate_frame_data", "selected_frames"):
@@ -66,6 +68,7 @@ class SceneAssetExporter:
         scene_dir: Path,
         start_seconds: float,
         duration_seconds: float,
+        source_duration: float,
     ) -> dict[str, Any]:
         candidate_dir = scene_dir / "candidates"
         selected_dir = scene_dir / "selected"
@@ -75,7 +78,9 @@ class SceneAssetExporter:
         candidate_data: list[dict[str, Any]] = []
         signatures: list[Any] = []
         for position in candidate_positions:
-            timestamp = start_seconds + duration_seconds * position
+            timestamp = self._frame_timestamp(
+                start_seconds, duration_seconds, position, source_duration
+            )
             filename = f"candidate_{round(position * 100):02d}.jpg"
             output_path = candidate_dir / filename
             self._export_frame(source_path, output_path, timestamp, quality=6)
@@ -104,7 +109,9 @@ class SceneAssetExporter:
 
         selected_frames: list[dict[str, Any]] = []
         for index, position in enumerate(selected_positions, start=1):
-            timestamp = start_seconds + duration_seconds * position
+            timestamp = self._frame_timestamp(
+                start_seconds, duration_seconds, position, source_duration
+            )
             filename = f"frame_{index:02d}_{round(position * 100):02d}.jpg"
             output_path = selected_dir / filename
             self._export_frame(source_path, output_path, timestamp, quality=2)
@@ -137,6 +144,52 @@ class SceneAssetExporter:
                 "-frames:v", "1", "-q:v", str(quality), str(output_path),
             ]
         )
+        if not output_path.is_file() or output_path.stat().st_size <= 0:
+            raise ShotDecodeError(
+                f"FFmpeg 未导出关键帧：{timestamp:.3f} 秒处没有可解码画面"
+            )
+
+    @staticmethod
+    def _frame_timestamp(
+        start_seconds: float,
+        duration_seconds: float,
+        position: float,
+        source_duration: float,
+    ) -> float:
+        # SceneDetect 对可变帧率视频的尾帧时间可能略超过 FFmpeg 的可解码范围。
+        # 导出帧时始终留出一个帧间隔，避免在 EOF 上请求一张不存在的图片。
+        requested = max(0.0, start_seconds + duration_seconds * position)
+        last_decodable = max(0.0, source_duration - 0.1)
+        return min(requested, last_decodable)
+
+    def _source_duration(self, source_path: Path) -> float:
+        probe_binary = (
+            str(Path(self.ffmpeg_binary).with_name("ffprobe"))
+            if "/" in self.ffmpeg_binary
+            else "ffprobe"
+        )
+        try:
+            result = subprocess.run(
+                [
+                    probe_binary,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(source_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            duration = float(result.stdout.strip())
+        except (FileNotFoundError, subprocess.CalledProcessError, ValueError) as exc:
+            raise ShotDecodeError("无法读取参考视频时长，不能导出关键帧") from exc
+        if duration <= 0:
+            raise ShotDecodeError("参考视频时长无效，不能导出关键帧")
+        return duration
 
     def _run_ffmpeg(self, arguments: list[str]) -> None:
         command = [

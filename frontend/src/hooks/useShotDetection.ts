@@ -9,12 +9,16 @@ export function useShotDetection() {
   const [error, setError] = useState("");
   const requestId = useRef(0);
 
-  const detect = useCallback(async (awemeId: string, mediaUrl: string) => {
+  const detect = useCallback(async (
+    awemeId: string,
+    mediaUrl: string,
+    localAnalysisId?: string,
+  ) => {
     const currentRequest = ++requestId.current;
     setLoading(true);
     setError("");
     try {
-      const nextResult = await detectShots(awemeId, mediaUrl);
+      const nextResult = await detectShots(awemeId, mediaUrl, localAnalysisId);
       if (requestId.current === currentRequest) setResult(nextResult);
       return nextResult;
     } catch (requestError) {

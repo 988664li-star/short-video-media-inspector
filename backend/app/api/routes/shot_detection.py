@@ -62,6 +62,26 @@ async def detect_shots(
     media_registry: Annotated[MediaRegistry, Depends(get_media_registry)],
     service: Annotated[ShotDetectionService, Depends(get_shot_detection_service)],
 ) -> dict[str, Any]:
+    if request.local_analysis_id:
+        try:
+            payload = await service.detect_saved_source(
+                request.aweme_id, request.local_analysis_id
+            )
+            payload["asset_base_url"] = (
+                f"/api/shot-detection/{request.local_analysis_id}/assets"
+            )
+            return payload
+        except ShotDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        except ShotDetectionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
     match = MEDIA_PROXY_PATTERN.fullmatch(request.media_url)
     if match is None:
         raise HTTPException(
@@ -94,7 +114,7 @@ async def detect_shots(
         ) from exc
     except ShotDecodeError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     except ShotDetectionError as exc:
@@ -189,13 +209,25 @@ def save_seedance_workspace(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@router.get("/shot-detection/{analysis_id}/seedance-generation-review")
+async def get_seedance_generation_review(
+    analysis_id: str,
+    service: Annotated[SeedanceWorkspaceService, Depends(get_seedance_workspace_service)],
+) -> dict[str, Any]:
+    """Prepare the exact video, image and prompt submission package without a model call."""
+    try:
+        return await service.get_generation_review(analysis_id)
+    except SeedanceWorkspaceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/shot-detection/{analysis_id}/seedance-anchor-images")
 async def generate_seedance_anchor_image(
     analysis_id: str,
     request: SeedanceAnchorImageRequest,
     service: Annotated[SeedanceWorkspaceService, Depends(get_seedance_workspace_service)],
 ) -> dict[str, Any]:
-    """Explicitly create one billable GPT Image visual anchor per storyboard segment."""
+    """Explicitly create one billable Seedream visual anchor per storyboard segment."""
     try:
         return await service.generate_anchor_image(
             analysis_id, request.segment_id, force=request.force
@@ -321,6 +353,18 @@ async def refresh_seedance_task(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except SeedanceProviderError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except SeedanceWorkspaceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/shot-detection/{analysis_id}/seedance-tasks/compose")
+async def compose_seedance_tasks(
+    analysis_id: str,
+    service: Annotated[SeedanceWorkspaceService, Depends(get_seedance_workspace_service)],
+) -> dict[str, Any]:
+    """Locally combine completed renders with the original mixed audio track."""
+    try:
+        return await service.compose_completed_video(analysis_id)
     except SeedanceWorkspaceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

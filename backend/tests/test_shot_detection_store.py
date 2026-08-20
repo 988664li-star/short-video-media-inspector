@@ -20,3 +20,12 @@ def test_cleanup_keeps_incomplete_job_without_result(tmp_path: Path):
 
     assert store.cleanup_expired() == 0
     assert incomplete_job.exists()
+
+
+def test_cache_key_uses_stable_aweme_identity_not_expiring_cdn_url(tmp_path: Path):
+    store = ShotDetectionStore(tmp_path, cache_ttl_seconds=1)
+
+    first = store.cache_key("1234567890", "https://cdn.example/a?expires=1", 27, 0.5)
+    refreshed = store.cache_key("1234567890", "https://cdn.example/b?expires=2", 27, 0.5)
+
+    assert first == refreshed

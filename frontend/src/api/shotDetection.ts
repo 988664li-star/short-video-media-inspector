@@ -5,18 +5,27 @@ import type {
   SeedanceReplacementBinding,
   SeedanceModelId,
   SeedanceAnchorImagePreviewResult,
+  SeedanceGenerationReviewResult,
   SeedanceWorkspaceResult,
   SavedShotAnalysisState,
   ShotDetectionResult,
   StoryboardScriptResult,
 } from "../types/shotDetection";
 
-export function detectShots(awemeId: string, mediaUrl: string) {
+export function detectShots(
+  awemeId: string,
+  mediaUrl: string,
+  localAnalysisId?: string,
+) {
   return apiRequest<ShotDetectionResult>(
     "/api/shot-detection",
     {
       method: "POST",
-      body: JSON.stringify({ aweme_id: awemeId, media_url: mediaUrl }),
+      body: JSON.stringify({
+        aweme_id: awemeId,
+        media_url: mediaUrl,
+        local_analysis_id: localAnalysisId,
+      }),
     },
     "自动分镜失败",
   );
@@ -40,7 +49,7 @@ export function getSavedShotAnalysisState(analysisId: string) {
 
 export interface SeedanceWorkspaceInput {
   model: SeedanceModelId;
-  prompt: string;
+  extra_instruction: string;
   bindings: SeedanceReplacementBinding[];
 }
 
@@ -119,6 +128,14 @@ export function getSeedanceAnchorImagePreviews(analysisId: string) {
   );
 }
 
+export function getSeedanceGenerationReview(analysisId: string) {
+  return apiRequest<SeedanceGenerationReviewResult>(
+    `/api/shot-detection/${analysisId}/seedance-generation-review`,
+    {},
+    "准备生成审查包失败",
+  );
+}
+
 export function bindSeedanceAnchorImage(
   analysisId: string,
   segmentId: number,
@@ -136,6 +153,14 @@ export function refreshSeedanceTask(analysisId: string, localTaskId: string) {
     `/api/shot-detection/${analysisId}/seedance-tasks/${localTaskId}/refresh`,
     { method: "POST" },
     "刷新 Seedance 任务状态失败",
+  );
+}
+
+export function composeSeedanceTasks(analysisId: string) {
+  return apiRequest<SeedanceWorkspaceResult>(
+    `/api/shot-detection/${analysisId}/seedance-tasks/compose`,
+    { method: "POST" },
+    "合成成片失败",
   );
 }
 

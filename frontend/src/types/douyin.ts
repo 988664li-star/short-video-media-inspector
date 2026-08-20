@@ -4,6 +4,9 @@ export interface MediaAsset {
   label: string;
   source_url?: string;
   proxy_url: string;
+  /** A local copy created immediately while the signed CDN URL is still valid. */
+  local_proxy_url?: string;
+  local_analysis_id?: string;
 }
 
 interface TranscriptionSegment {

@@ -15,7 +15,7 @@ export function VideoStage({ data, videoRef }: VideoStageProps) {
           playsInline
           preload="metadata"
           ref={videoRef}
-          src={data.video.proxy_url}
+          src={data.video.local_proxy_url ?? data.video.proxy_url}
           poster={data.images[0]?.proxy_url}
         />
       ) : (

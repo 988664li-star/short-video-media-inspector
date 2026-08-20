@@ -1,4 +1,4 @@
-import { Boxes, Clapperboard, ImageUp, LoaderCircle, Replace, ScanLine } from "lucide-react";
+import { LoaderCircle, ScanLine } from "lucide-react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 import type { ContentPlatform } from "../../api/douyin";
@@ -20,29 +20,6 @@ interface ViralRemixCenterProps {
   videoRef?: RefObject<HTMLVideoElement | null>;
   children?: ReactNode;
 }
-
-const WORKFLOW_STEPS = [
-  {
-    icon: Clapperboard,
-    title: "理解参考视频",
-    description: "导入已授权参考作品，识别镜头、节奏、爆点与可编辑区域。",
-  },
-  {
-    icon: Boxes,
-    title: "确认替换商品",
-    description: "只勾选要替换的商品，并确认它出现在哪些镜头中。",
-  },
-  {
-    icon: ImageUp,
-    title: "上传商品图",
-    description: "上传你的商品图；系统为各镜头准备可审核的视觉锚点。",
-  },
-  {
-    icon: Replace,
-    title: "生成替换片段",
-    description: "保持动作、机位和节奏，逐镜头生成并审核每段结果。",
-  },
-] as const;
 
 export function ViralRemixCenter({
   data,
@@ -118,16 +95,10 @@ export function ViralRemixCenter({
           {children}
         </div>
       ) : (
-        <div className="replication-workflow" aria-label="爆款复刻工作流">
-          {WORKFLOW_STEPS.map(({ icon: Icon, title, description }, index) => (
-            <article className="replication-step panel" key={title}>
-              <span className="replication-step__number">0{index + 1}</span>
-              <Icon aria-hidden="true" />
-              <h3>{title}</h3>
-              <p>{description}</p>
-            </article>
-          ))}
-        </div>
+        <section className="replication-empty-state" aria-label="下一步提示">
+          <h3>导入后开始配置</h3>
+          <p>视频解析完成后，会进入四步流程；每次只需要完成当前一步。</p>
+        </section>
       )}
     </section>
   );

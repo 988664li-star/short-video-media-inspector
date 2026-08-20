@@ -23,6 +23,7 @@ from uuid import uuid4
 import httpx
 
 from .object_storage import ObjectStorageError, SeedanceObjectStorage
+from .prompt_templates import SeedancePromptTemplateError, SeedancePromptTemplates
 
 
 SEEDANCE_MINI_MODEL = "doubao-seedance-2-0-mini-260615"
@@ -36,7 +37,12 @@ SUPPORTED_SEEDANCE_MODELS = frozenset(
     }
 )
 logger = logging.getLogger(__name__)
-GPT_IMAGE_ANCHOR_MODEL_SUFFIX = " [clean-montage-v2]"
+SEEDREAM_ANCHOR_MODEL_SUFFIX = " [context-lock-v3]"
+# Seedream requires an output size of at least 3,686,400 pixels.  These retain
+# the 2:3 contact-sheet ratio while exceeding that floor in both orientations.
+SEEDREAM_ANCHOR_PORTRAIT_SIZE = (1600, 2400)
+SEEDREAM_ANCHOR_LANDSCAPE_SIZE = (2400, 1600)
+MAX_VIDEO_REFERENCE_IMAGES = 9
 
 
 class SeedanceWorkspaceError(RuntimeError):
@@ -66,9 +72,6 @@ class SeedanceWorkspaceService:
         ffmpeg_binary: str = "ffmpeg",
         image_api_url: str = "https://ark.cn-beijing.volces.com/api/v3/images/generations",
         image_model: str = "doubao-seedream-5-0-260128",
-        gpt_image_api_key: str = "",
-        gpt_image_edits_url: str = "https://dm-fox.rjj.cc/codex/v1/images/edits",
-        gpt_image_model: str = "gpt-image-2",
     ) -> None:
         self.db_path = db_path
         self.api_key = api_key
@@ -80,9 +83,7 @@ class SeedanceWorkspaceService:
         self.ffmpeg_binary = ffmpeg_binary
         self.image_api_url = image_api_url.rstrip("/")
         self.image_model = image_model
-        self.gpt_image_api_key = gpt_image_api_key
-        self.gpt_image_edits_url = gpt_image_edits_url.rstrip("/")
-        self.gpt_image_model = gpt_image_model
+        self.prompt_templates = SeedancePromptTemplates.load()
         self._segment_lock = asyncio.Lock()
 
     def initialize(self) -> None:
@@ -93,7 +94,7 @@ class SeedanceWorkspaceService:
                 CREATE TABLE IF NOT EXISTS replica_workspaces (
                     analysis_id TEXT PRIMARY KEY,
                     model TEXT NOT NULL,
-                    prompt TEXT NOT NULL DEFAULT '',
+                    extra_instruction TEXT NOT NULL DEFAULT '',
                     bindings_json TEXT NOT NULL DEFAULT '[]',
                     version INTEGER NOT NULL DEFAULT 1,
                     updated_at INTEGER NOT NULL
@@ -111,14 +112,6 @@ class SeedanceWorkspaceService:
                     error_json TEXT NOT NULL DEFAULT '{}',
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS replica_prompt_versions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    analysis_id TEXT NOT NULL,
-                    version INTEGER NOT NULL,
-                    prompt TEXT NOT NULL,
-                    created_at INTEGER NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS seedance_tasks (
@@ -146,6 +139,7 @@ class SeedanceWorkspaceService:
                     end_ms INTEGER NOT NULL,
                     video_file_id TEXT NOT NULL,
                     contact_sheet_file_id TEXT NOT NULL,
+                    source_anchor_file_id TEXT NOT NULL DEFAULT '',
                     created_at INTEGER NOT NULL,
                     PRIMARY KEY (analysis_id, segment_id)
                 );
@@ -163,26 +157,6 @@ class SeedanceWorkspaceService:
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     PRIMARY KEY (analysis_id, segment_id)
-                );
-
-                CREATE TABLE IF NOT EXISTS seedance_shot_visual_anchors (
-                    analysis_id TEXT NOT NULL,
-                    segment_id INTEGER NOT NULL,
-                    shot_order INTEGER NOT NULL,
-                    scene_id INTEGER NOT NULL,
-                    start_ms INTEGER NOT NULL,
-                    end_ms INTEGER NOT NULL,
-                    source_frame_path TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    prompt TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    anchor_file_id TEXT NOT NULL DEFAULT '',
-                    request_json TEXT NOT NULL DEFAULT '{}',
-                    response_json TEXT NOT NULL DEFAULT '{}',
-                    error_message TEXT NOT NULL DEFAULT '',
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    PRIMARY KEY (analysis_id, segment_id, shot_order)
                 );
 
                 CREATE TABLE IF NOT EXISTS ark_api_events (
@@ -211,12 +185,26 @@ class SeedanceWorkspaceService:
             ):
                 if name not in task_columns:
                     connection.execute(f"ALTER TABLE seedance_tasks ADD COLUMN {name} {definition}")
+            workspace_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(replica_workspaces)")
+            }
+            if "extra_instruction" not in workspace_columns:
+                connection.execute(
+                    "ALTER TABLE replica_workspaces ADD COLUMN extra_instruction TEXT NOT NULL DEFAULT ''"
+                )
             file_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(ark_files)")
             }
             if "storage_object_key" not in file_columns:
                 connection.execute(
                     "ALTER TABLE ark_files ADD COLUMN storage_object_key TEXT NOT NULL DEFAULT ''"
+                )
+            segment_media_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(seedance_segment_media)")
+            }
+            if "source_anchor_file_id" not in segment_media_columns:
+                connection.execute(
+                    "ALTER TABLE seedance_segment_media ADD COLUMN source_anchor_file_id TEXT NOT NULL DEFAULT ''"
                 )
         self.object_storage.ensure_bucket()
 
@@ -238,17 +226,13 @@ class SeedanceWorkspaceService:
                 "SELECT * FROM seedance_visual_anchors WHERE analysis_id = ? ORDER BY segment_id",
                 (analysis_id,),
             ).fetchall()
-            shot_anchors = connection.execute(
-                "SELECT * FROM seedance_shot_visual_anchors WHERE analysis_id = ? ORDER BY segment_id, shot_order",
-                (analysis_id,),
-            ).fetchall()
         return {
             "analysis_id": analysis_id,
             "workspace": self._workspace_payload(workspace),
             "tasks": [self._task_payload(task) for task in tasks],
             "ark_events": [self._ark_event_payload(event) for event in ark_events],
             "anchors": [self._anchor_payload(anchor) for anchor in anchors],
-            "shot_anchors": [self._shot_anchor_payload(anchor) for anchor in shot_anchors],
+            "completed_videos": self._completed_video_payloads(analysis_id),
         }
 
     def save_workspace(self, analysis_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -256,7 +240,7 @@ class SeedanceWorkspaceService:
         model = str(payload.get("model") or SEEDANCE_MINI_MODEL)
         if model not in SUPPORTED_SEEDANCE_MODELS:
             raise SeedanceWorkspaceError("请选择工作台提供的 Seedance 2.0 系列模型")
-        prompt = str(payload.get("prompt") or "")
+        extra_instruction = str(payload.get("extra_instruction") or "")
         bindings = payload.get("bindings")
         if not isinstance(bindings, list):
             raise SeedanceWorkspaceError("素材绑定格式不正确")
@@ -264,33 +248,24 @@ class SeedanceWorkspaceService:
         encoded_bindings = json.dumps(bindings, ensure_ascii=False, separators=(",", ":"))
         with self._connect() as connection:
             previous = connection.execute(
-                "SELECT version, prompt FROM replica_workspaces WHERE analysis_id = ?",
+                "SELECT version, extra_instruction FROM replica_workspaces WHERE analysis_id = ?",
                 (analysis_id,),
             ).fetchone()
             version = int(previous["version"]) + 1 if previous else 1
             connection.execute(
                 """
                 INSERT INTO replica_workspaces
-                    (analysis_id, model, prompt, bindings_json, version, updated_at)
+                    (analysis_id, model, extra_instruction, bindings_json, version, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(analysis_id) DO UPDATE SET
                     model = excluded.model,
-                    prompt = excluded.prompt,
+                    extra_instruction = excluded.extra_instruction,
                     bindings_json = excluded.bindings_json,
                     version = excluded.version,
                     updated_at = excluded.updated_at
                 """,
-                (analysis_id, model, prompt, encoded_bindings, version, now),
+                (analysis_id, model, extra_instruction, encoded_bindings, version, now),
             )
-            if previous is None or previous["prompt"] != prompt:
-                connection.execute(
-                    """
-                    INSERT INTO replica_prompt_versions
-                        (analysis_id, version, prompt, created_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (analysis_id, version, prompt, now),
-                )
         return self.get_workspace(analysis_id)
 
     async def build_request_plan(
@@ -299,9 +274,14 @@ class SeedanceWorkspaceService:
         workspace = self.get_workspace(analysis_id)["workspace"]
         if workspace is None:
             raise SeedanceWorkspaceError("请先保存替换方案和素材绑定")
-        prompt = workspace["prompt"].strip()
-        if not prompt:
-            raise SeedanceWorkspaceError("请先生成或填写测试提示词")
+        base_instruction = self._video_edit_instruction(analysis_id, workspace)
+        source_ratio = self._source_video_ratio(analysis_id)
+        products = self._selected_product_contexts(analysis_id, workspace["bindings"])
+        product_file_ids = [file_id for product in products for file_id in product["file_ids"]]
+        if len(product_file_ids) > MAX_VIDEO_REFERENCE_IMAGES - 2:
+            raise SeedanceWorkspaceError(
+                f"视频生成最多使用 {MAX_VIDEO_REFERENCE_IMAGES - 2} 张产品参考图；请保留最能说明产品外观的图片"
+            )
 
         media = await self._ensure_segment_media(analysis_id)
         if segment_id is not None:
@@ -323,7 +303,7 @@ class SeedanceWorkspaceService:
                 )
             if anchor["status"] != "uploaded" and anchor["model"] != self._anchor_model_name:
                 raise SeedanceWorkspaceError(
-                    f"分段 {segment_id:02d} 的锚点图不符合当前处理规则；请用 GPT Image 2 重新编辑或上传人工处理后的干净拼图"
+                    f"分段 {segment_id:02d} 的锚点图不符合当前处理规则；请用 Seedream 5.0 重新编辑或上传人工处理后的干净拼图"
                 )
             video_url = await self._resolve_file_download_url(
                 analysis_id, segment["video_file_id"], f"分段 {segment_id:02d} 原视频"
@@ -331,17 +311,83 @@ class SeedanceWorkspaceService:
             anchor_urls = [await self._resolve_file_download_url(
                 analysis_id, anchor["anchor_file_id"], f"分段 {segment_id:02d} 合并分镜锚点图"
             )]
-            segment_prompt = self._segment_video_prompt(prompt, segment)
+            source_anchor_url = await self._resolve_file_download_url(
+                analysis_id,
+                str(segment["source_anchor_file_id"]),
+                f"分段 {segment_id:02d} 原始关键帧拼图",
+            )
+            product_urls = await asyncio.gather(*[
+                self._resolve_file_download_url(
+                    analysis_id, file_id, "目标产品参考图"
+                )
+                for file_id in product_file_ids
+            ])
+            segment_prompt = self._segment_video_instruction(base_instruction)
             planned.append(
                 self._request_plan_item(
                     workspace["model"],
                     segment_prompt,
                     video_url,
-                    anchor_urls,
+                    [*anchor_urls, source_anchor_url, *product_urls],
                     segment,
+                    source_ratio,
                 )
             )
         return {"segments": planned}
+
+    async def get_generation_review(self, analysis_id: str) -> dict[str, Any]:
+        """Prepare every exact submission asset for user review without a model call."""
+        workspace = self.get_workspace(analysis_id)["workspace"]
+        if workspace is None:
+            raise SeedanceWorkspaceError("请先保存替换方案和素材绑定")
+        base_instruction = self._video_edit_instruction(analysis_id, workspace)
+        products = self._selected_product_contexts(analysis_id, workspace["bindings"])
+        product_files = {
+            file_id: await self.refresh_file(analysis_id, file_id)
+            for product in products
+            for file_id in product["file_ids"]
+        }
+        product_references = [
+            {
+                "candidate_id": product["candidate_id"],
+                "target_description": product["target_description"],
+                "assets": [product_files[file_id] for file_id in product["file_ids"]],
+            }
+            for product in products
+        ]
+        media_by_segment = {
+            int(segment["segment_id"]): segment
+            for segment in await self._ensure_segment_media(analysis_id)
+        }
+        anchors = self._anchors_by_segment(analysis_id)
+        review_segments: list[dict[str, Any]] = []
+        for segment in self._load_storyboard_segments(analysis_id):
+            segment_id = int(segment["segment_id"])
+            media = media_by_segment.get(segment_id)
+            anchor = anchors.get(segment_id)
+            if media is None or anchor is None or not anchor.get("anchor_file_id"):
+                raise SeedanceWorkspaceError(f"连续片段 {segment_id:02d} 缺少可审查的提交素材")
+            review_segments.append(
+                {
+                    "segment_id": segment_id,
+                    "start_ms": int(segment["start_ms"]),
+                    "end_ms": int(segment["end_ms"]),
+                    "prompt": self._segment_video_instruction(base_instruction),
+                    "source_video": await self.refresh_file(
+                        analysis_id, str(media["video_file_id"])
+                    ),
+                    "anchor_image": await self.refresh_file(
+                        analysis_id, str(anchor["anchor_file_id"])
+                    ),
+                    "source_keyframe_image": await self.refresh_file(
+                        analysis_id, str(media["source_anchor_file_id"])
+                    ),
+                    "product_references": product_references,
+                }
+            )
+        return {
+            "segments": review_segments,
+        }
 
     @staticmethod
     def _request_plan_item(
@@ -350,6 +396,7 @@ class SeedanceWorkspaceService:
         video_url: str,
         image_urls: list[str],
         segment: dict[str, Any],
+        ratio: str,
     ) -> dict[str, Any]:
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt},
@@ -374,20 +421,45 @@ class SeedanceWorkspaceService:
                 "content": content,
                 "generate_audio": False,
                 "watermark": False,
-                "duration": -1,
-                "ratio": "adaptive",
+                "duration": SeedanceWorkspaceService._segment_duration_seconds(segment),
+                "ratio": ratio,
             },
         }
 
     @staticmethod
-    def _segment_video_prompt(prompt: str, segment: dict[str, Any]) -> str:
-        return (
-            f"本次只严格编辑 @视频1 的分段 {int(segment['segment_id']):02d}"
-            f"（{int(segment['start_ms']) / 1000:.2f}–{int(segment['end_ms']) / 1000:.2f} 秒）。"
-            "@图片1 是该分段全部镜头合并后的最终视觉锚点图，按网格顺序对应视频中的各个镜头。"
-            "严格以其中已确认的目标产品外观、状态、手部交互和光照作为本分段的一致性参考；"
-            "它不是新的场景，也不是多件产品。不要延伸、补写或重排其他分段。\n\n"
-            f"{prompt}"
+    def _segment_duration_seconds(segment: dict[str, Any]) -> int:
+        duration_seconds = (
+            int(segment["end_ms"]) - int(segment["start_ms"])
+        ) / 1000
+        return max(4, min(15, round(duration_seconds)))
+
+    def _source_video_ratio(self, analysis_id: str) -> str:
+        try:
+            source_path = self._analysis_job_path(analysis_id) / "source.mp4"
+        except SeedanceWorkspaceError:
+            return "adaptive"
+        try:
+            import av
+
+            with av.open(str(source_path)) as container:
+                stream = container.streams.video[0]
+                width, height = int(stream.width), int(stream.height)
+        except (ImportError, OSError, IndexError, ValueError):
+            return "adaptive"
+        if width <= 0 or height <= 0:
+            return "adaptive"
+        candidates = {
+            "16:9": 16 / 9,
+            "4:3": 4 / 3,
+            "1:1": 1,
+            "3:4": 3 / 4,
+            "9:16": 9 / 16,
+            "21:9": 21 / 9,
+        }
+        source_ratio = width / height
+        return min(
+            candidates,
+            key=lambda ratio: abs(math.log(source_ratio / candidates[ratio])),
         )
 
     async def generate_anchor_image(
@@ -399,8 +471,8 @@ class SeedanceWorkspaceService:
         keeping the image-edit stage affordable while giving the video model one
         visual consistency reference for that segment.
         """
-        if not self.gpt_image_api_key:
-            raise SeedanceConfigurationError("未配置 GPT_IMAGE_API_KEY，无法调用 GPT Image 2 图片编辑")
+        if not self.api_key:
+            raise SeedanceConfigurationError("未配置 ARK_API_KEY，无法调用 Seedream 5.0 图片编辑")
         workspace = self.get_workspace(analysis_id)["workspace"]
         if workspace is None:
             raise SeedanceWorkspaceError("请先保存替换方案和产品素材")
@@ -422,20 +494,22 @@ class SeedanceWorkspaceService:
         if not products:
             raise SeedanceWorkspaceError("请先勾选产品并上传至少一张产品参考图")
         product_file_ids = [file_id for product in products for file_id in product["file_ids"]]
-        if len(product_file_ids) > 15:
-            raise SeedanceWorkspaceError("GPT Image 2 单次最多使用 15 张产品参考图")
+        if len(product_file_ids) > MAX_VIDEO_REFERENCE_IMAGES - 2:
+            raise SeedanceWorkspaceError(
+                f"单次最多使用 {MAX_VIDEO_REFERENCE_IMAGES - 2} 张产品参考图；这是视频任务可直接使用的上限"
+            )
         source_path = self._ensure_anchor_source_image(analysis_id, segment)
         if not source_path.is_file():
             raise SeedanceWorkspaceError("原始分镜关键帧不存在，请重新执行自动分镜")
-        prompt = self._anchor_prompt(segment, products)
-        image_size = self._gpt_image_size(source_path)
+        prompt = self._anchor_edit_instruction(segment, products)
+        image_size = self._anchor_image_size(source_path)
         product_files = [await self.refresh_file(analysis_id, file_id) for file_id in product_file_ids]
         request_payload = {
-            "model": self.gpt_image_model,
+            "model": self.image_model,
             "prompt": prompt,
             "size": image_size,
-            "quality": "high",
             "response_format": "b64_json",
+            "watermark": False,
             "images": [
                 {"index": 1, "role": "source_contact_sheet", "filename": source_path.name},
                 *[
@@ -444,53 +518,55 @@ class SeedanceWorkspaceService:
                 ],
             ],
         }
-        operation = "gpt-image.anchor.submit"
-        self._log_ark_request(operation, analysis_id, self.gpt_image_edits_url, request_payload)
+        operation = "seedream.anchor.submit"
+        self._log_ark_request(operation, analysis_id, self.image_api_url, request_payload)
         try:
-            multipart_images: list[tuple[str, tuple[str, bytes, str]]] = [
-                ("image", (source_path.name, source_path.read_bytes(), "image/jpeg"))
+            reference_images = [
+                self._image_data_url(source_path.read_bytes(), "image/jpeg")
             ]
             for file_payload in product_files:
                 image_bytes = await self._download_file_bytes(str(file_payload["download_url"]))
                 mime_type = str(file_payload.get("mime_type") or "image/png")
-                multipart_images.append(
-                    ("image", (str(file_payload["filename"]), image_bytes, mime_type))
-                )
-            form = {
-                "model": self.gpt_image_model,
+                reference_images.append(self._image_data_url(image_bytes, mime_type))
+            provider_payload = {
+                "model": self.image_model,
                 "prompt": prompt,
+                "image": reference_images,
                 "size": image_size,
-                "quality": "high",
                 "response_format": "b64_json",
+                "watermark": False,
             }
             async with httpx.AsyncClient(timeout=180) as client:
                 response = await client.post(
-                    self.gpt_image_edits_url,
-                    headers={"Authorization": f"Bearer {self.gpt_image_api_key}"},
-                    data=form,
-                    files=multipart_images,
+                    self.image_api_url,
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=provider_payload,
                 )
             body = self._response_json(response)
             self._log_ark_response(operation, analysis_id, response.status_code, body)
-            error = "" if not response.is_error else self._provider_error_message(body, response.status_code)
+            error = "" if not response.is_error else self._provider_error_message(
+                body, response.status_code, provider="Seedream 5.0 图片编辑接口"
+            )
             self._record_ark_event(
-                analysis_id, operation, "POST", self.gpt_image_edits_url, request_payload,
+                analysis_id, operation, "POST", self.image_api_url, request_payload,
                 body if isinstance(body, dict) else {"raw": body}, response.status_code, error,
             )
             if response.is_error:
                 self._save_anchor(analysis_id, segment_id, prompt, "failed", "", request_payload, body if isinstance(body, dict) else {"raw": body}, error)
                 raise SeedanceProviderError(error)
-            anchor_file_id = self._store_gpt_image_result(analysis_id, segment, body)
+            anchor_file_id = await self._store_seedream_image_result(
+                analysis_id, segment, body
+            )
             self._save_anchor(analysis_id, segment_id, prompt, "succeeded", anchor_file_id, request_payload, body if isinstance(body, dict) else {"raw": body}, "")
         except httpx.HTTPError as exc:
-            error = f"GPT Image 2 图片编辑请求失败：{exc}"
-            self._record_ark_event(analysis_id, operation, "POST", self.gpt_image_edits_url, request_payload, {}, None, error)
+            error = f"Seedream 5.0 图片编辑请求失败：{exc}"
+            self._record_ark_event(analysis_id, operation, "POST", self.image_api_url, request_payload, {}, None, error)
             self._save_anchor(analysis_id, segment_id, prompt, "failed", "", request_payload, {}, error)
             raise SeedanceProviderError(error) from exc
         return self.get_workspace(analysis_id)
 
     def get_anchor_image_previews(self, analysis_id: str) -> dict[str, Any]:
-        """Return the exact non-billable GPT Image 2 plan for each segment."""
+        """Return the exact non-billable Seedream 5.0 plan for each segment."""
         self._validate_analysis_id(analysis_id)
         workspace = self.get_workspace(analysis_id)["workspace"]
         if workspace is None:
@@ -530,17 +606,17 @@ class SeedanceWorkspaceService:
                     "source_frame_path": self._ensure_anchor_source_image(analysis_id, segment).relative_to(
                         self._analysis_job_path(analysis_id)
                     ).as_posix(),
-                    "prompt": self._anchor_prompt(segment, products) if ready else "",
+                    "prompt": self._anchor_edit_instruction(segment, products) if ready else "",
                     "inputs": inputs,
                     "ready": ready,
                     "message": "" if ready else "请先勾选产品并绑定至少一张产品参考图，再查看图片处理提示词。",
-                    "model": self.gpt_image_model,
+                    "model": self.image_model,
                 }
             )
         return {"previews": previews}
 
     async def bind_anchor_image(self, analysis_id: str, segment_id: int, file_id: str) -> dict[str, Any]:
-        """Use a user-provided processed contact sheet instead of GPT Image 2."""
+        """Use a user-provided processed contact sheet instead of Seedream 5.0."""
         file = await self.refresh_file(analysis_id, file_id)
         if not file["mime_type"].startswith("image/"):
             raise SeedanceWorkspaceError("视觉锚点必须是图片文件")
@@ -560,7 +636,11 @@ class SeedanceWorkspaceService:
         segments = self._load_storyboard_segments(analysis_id)
         async with self._segment_lock:
             cached = self._segment_media_by_id(analysis_id)
-            missing = [segment for segment in segments if int(segment["segment_id"]) not in cached]
+            missing = [
+                segment
+                for segment in segments
+                if not cached.get(int(segment["segment_id"]), {}).get("source_anchor_file_id")
+            ]
             if not missing:
                 return [{**segment, **cached[int(segment["segment_id"])]} for segment in segments]
             source_path = self._analysis_job_path(analysis_id) / "source.mp4"
@@ -587,12 +667,20 @@ class SeedanceWorkspaceService:
                     sheet_file_id = self._store_local_asset(
                         analysis_id, contact_sheet, "image/jpeg", f"segment-{segment_id:03d}-storyboard.jpg"
                     )
+                    source_anchor = self._ensure_anchor_source_image(analysis_id, segment)
+                    source_anchor_file_id = self._store_local_asset(
+                        analysis_id,
+                        source_anchor,
+                        "image/jpeg",
+                        f"segment-{segment_id:03d}-source-keyframes.jpg",
+                    )
                     self._save_segment_media(
-                        analysis_id, segment, video_file_id, sheet_file_id
+                        analysis_id, segment, video_file_id, sheet_file_id, source_anchor_file_id
                     )
                     cached[segment_id] = {
                         "video_file_id": video_file_id,
                         "contact_sheet_file_id": sheet_file_id,
+                        "source_anchor_file_id": source_anchor_file_id,
                     }
         return [{**segment, **cached[int(segment["segment_id"])]} for segment in segments]
 
@@ -735,21 +823,21 @@ class SeedanceWorkspaceService:
 
     @property
     def _anchor_model_name(self) -> str:
-        return f"{self.gpt_image_model}{GPT_IMAGE_ANCHOR_MODEL_SUFFIX}"
+        return f"{self.image_model}{SEEDREAM_ANCHOR_MODEL_SUFFIX}"
 
     def _ensure_anchor_source_image(
         self, analysis_id: str, segment: dict[str, Any]
     ) -> Path:
         """Create the model input montage separately from the analysis contact sheet.
 
-        It uses one representative frame per shot and a GPT Image-supported
+        It uses one representative frame per shot and a Seedream-supported
         portrait/landscape canvas. Captions and gutters are deliberately omitted.
         """
         segment_id = int(segment["segment_id"])
         relative_output = (
             Path("storyboard_chunks")
             / f"segment_{segment_id:03d}"
-            / "anchor_input_clean_v2.jpg"
+            / "anchor_input_clean_v3.jpg"
         )
         output = self._safe_analysis_asset(analysis_id, relative_output.as_posix())
         if output.is_file() and output.stat().st_size > 0:
@@ -769,7 +857,11 @@ class SeedanceWorkspaceService:
             raise SeedanceWorkspaceError("缺少 Pillow，无法生成图片编辑输入拼图") from exc
         with Image.open(frames[0]) as first:
             first_width, first_height = first.size
-        canvas_size = (1024, 1536) if first_height >= first_width else (1536, 1024)
+        canvas_size = (
+            SEEDREAM_ANCHOR_PORTRAIT_SIZE
+            if first_height >= first_width
+            else SEEDREAM_ANCHOR_LANDSCAPE_SIZE
+        )
         columns, rows = self._montage_grid(
             len(frames),
             first_width / max(1, first_height),
@@ -816,14 +908,19 @@ class SeedanceWorkspaceService:
         return columns, rows
 
     @staticmethod
-    def _gpt_image_size(source_path: Path) -> str:
+    def _anchor_image_size(source_path: Path) -> str:
         try:
             from PIL import Image
         except ImportError as exc:
             raise SeedanceWorkspaceError("缺少 Pillow，无法读取图片编辑输入尺寸") from exc
         with Image.open(source_path) as image:
             width, height = image.size
-        return "1024x1536" if height >= width else "1536x1024"
+        dimensions = (
+            SEEDREAM_ANCHOR_PORTRAIT_SIZE
+            if height >= width
+            else SEEDREAM_ANCHOR_LANDSCAPE_SIZE
+        )
+        return f"{dimensions[0]}x{dimensions[1]}"
 
     def _find_storyboard_shot(
         self, analysis_id: str, segment_id: int, shot_order: int
@@ -851,27 +948,34 @@ class SeedanceWorkspaceService:
             int(row["segment_id"]): {
                 "video_file_id": str(row["video_file_id"]),
                 "contact_sheet_file_id": str(row["contact_sheet_file_id"]),
+                "source_anchor_file_id": str(row["source_anchor_file_id"]),
             }
             for row in rows
         }
 
     def _save_segment_media(
-        self, analysis_id: str, segment: dict[str, Any], video_file_id: str, contact_sheet_file_id: str
+        self,
+        analysis_id: str,
+        segment: dict[str, Any],
+        video_file_id: str,
+        contact_sheet_file_id: str,
+        source_anchor_file_id: str,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO seedance_segment_media
-                    (analysis_id, segment_id, start_ms, end_ms, video_file_id, contact_sheet_file_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (analysis_id, segment_id, start_ms, end_ms, video_file_id, contact_sheet_file_id, source_anchor_file_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(analysis_id, segment_id) DO UPDATE SET
                     start_ms = excluded.start_ms, end_ms = excluded.end_ms,
                     video_file_id = excluded.video_file_id,
-                    contact_sheet_file_id = excluded.contact_sheet_file_id
+                    contact_sheet_file_id = excluded.contact_sheet_file_id,
+                    source_anchor_file_id = excluded.source_anchor_file_id
                 """,
                 (
                     analysis_id, int(segment["segment_id"]), int(segment["start_ms"]), int(segment["end_ms"]),
-                    video_file_id, contact_sheet_file_id, int(time.time()),
+                    video_file_id, contact_sheet_file_id, source_anchor_file_id, int(time.time()),
                 ),
             )
 
@@ -881,17 +985,6 @@ class SeedanceWorkspaceService:
                 "SELECT * FROM seedance_visual_anchors WHERE analysis_id = ?", (analysis_id,)
             ).fetchall()
         return {int(row["segment_id"]): self._anchor_payload(row) for row in rows}
-
-    def _shot_anchors_by_key(self, analysis_id: str) -> dict[tuple[int, int], dict[str, Any]]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM seedance_shot_visual_anchors WHERE analysis_id = ?",
-                (analysis_id,),
-            ).fetchall()
-        return {
-            (int(row["segment_id"]), int(row["shot_order"])): self._shot_anchor_payload(row)
-            for row in rows
-        }
 
     def _selected_product_contexts(
         self, analysis_id: str, bindings: list[dict[str, Any]]
@@ -935,50 +1028,32 @@ class SeedanceWorkspaceService:
             )
         return products
 
-    @staticmethod
-    def _anchor_prompt(segment: dict[str, Any], products: list[dict[str, Any]]) -> str:
-        definitions = []
-        edits = []
-        image_index = 2
-        for ordinal, product in enumerate(products, start=1):
-            count = len(product["file_ids"])
-            refs = "、".join(f"图{index}" for index in range(image_index, image_index + count))
-            definitions.append(
-                f"将{refs}中展示的同一目标产品定义为产品{ordinal}：{product['target_description']}。"
+    def _video_edit_instruction(
+        self, analysis_id: str, workspace: dict[str, Any]
+    ) -> str:
+        products = self._selected_product_contexts(analysis_id, workspace["bindings"])
+        if not products:
+            raise SeedanceWorkspaceError("请先勾选商品并上传至少一张产品参考图")
+        try:
+            return self.prompt_templates.render_video_edit(
+                products, str(workspace.get("extra_instruction") or "")
             )
-            edits.append(f"将“{product['source_description']}”替换为产品{ordinal}")
-            image_index += count
-        return (
-            f"图1是原视频分段 {int(segment['segment_id']):02d} 的干净多镜头拼图，按时间顺序排列。"
-            "严格编辑图1，保留每个子画面的顺序、人物、手部动作、背景、机位、透视和光线；"
-            "不得改变拼图画布比例，不得添加间隔、边框、字幕、文字、水印或 Logo，不要把子画面合并成一张新场景。"
-            + "".join(definitions)
-            + "在图1的每一个子画面中" + "；".join(edits)
-            + "。替换后的产品在所有子画面中必须是同一件产品，外观、颜色、结构和细节一致；"
-            "亮灯、支撑、握持等状态需符合各子画面的原有交互。"
-        )
+        except SeedancePromptTemplateError as exc:
+            raise SeedanceWorkspaceError(str(exc)) from exc
 
-    @staticmethod
-    def _shot_anchor_prompt(shot: dict[str, Any], products: list[dict[str, Any]]) -> str:
-        definitions: list[str] = []
-        edits: list[str] = []
-        image_index = 2
-        for ordinal, product in enumerate(products, start=1):
-            refs = "、".join(
-                f"图{index}" for index in range(image_index, image_index + len(product["file_ids"]))
-            )
-            definitions.append(
-                f"图{refs.removeprefix('图')}展示同一目标产品，定义为产品{ordinal}：{product['target_description']}。"
-            )
-            edits.append(f"将“{product['source_description']}”替换为产品{ordinal}")
-            image_index += len(product["file_ids"])
-        return (
-            f"严格编辑图1（分段 {int(shot['segment_id']):02d} 的镜头 {int(shot['shot_order']):02d} 原始关键帧）。"
-            + "".join(definitions)
-            + "仅" + "；".join(edits)
-            + "。保留图1中的手部姿势和接触点、人物、背景、镜头构图、透视、光线、喷雾或发光效果、字幕与未提及物体；"
-            "不要重绘场景，不要改变任何未替换物体，不要新增文字、水印或 Logo。"
-        )
+    def _segment_video_instruction(self, base_instruction: str) -> str:
+        try:
+            return self.prompt_templates.render_segment_video(base_instruction)
+        except SeedancePromptTemplateError as exc:
+            raise SeedanceWorkspaceError(str(exc)) from exc
+
+    def _anchor_edit_instruction(
+        self, segment: dict[str, Any], products: list[dict[str, Any]]
+    ) -> str:
+        try:
+            return self.prompt_templates.render_anchor_edit(segment, products)
+        except SeedancePromptTemplateError as exc:
+            raise SeedanceWorkspaceError(str(exc)) from exc
 
     async def _download_file_bytes(self, url: str) -> bytes:
         try:
@@ -991,24 +1066,40 @@ class SeedanceWorkspaceService:
             raise SeedanceProviderError("下载的产品参考图为空")
         return response.content
 
-    def _store_gpt_image_result(self, analysis_id: str, segment: dict[str, Any], body: Any) -> str:
+    async def _store_seedream_image_result(
+        self, analysis_id: str, segment: dict[str, Any], body: Any
+    ) -> str:
         if not isinstance(body, dict):
-            raise SeedanceProviderError("GPT Image 2 没有返回有效结果")
+            raise SeedanceProviderError("Seedream 5.0 没有返回有效结果")
         data = body.get("data")
         first = data[0] if isinstance(data, list) and data else None
         encoded = first.get("b64_json") if isinstance(first, dict) else None
-        if not isinstance(encoded, str) or not encoded:
-            raise SeedanceProviderError("GPT Image 2 未返回 b64_json 图片数据")
-        try:
-            image_bytes = base64.b64decode(encoded, validate=True)
-        except (ValueError, TypeError) as exc:
-            raise SeedanceProviderError("GPT Image 2 返回的图片数据无法解码") from exc
-        if not image_bytes:
-            raise SeedanceProviderError("GPT Image 2 返回了空图片")
-        with tempfile.TemporaryDirectory(prefix="gpt-image-anchor-") as temp_dir:
-            output = Path(temp_dir) / f"segment-{int(segment['segment_id']):03d}-anchor.png"
-            output.write_bytes(image_bytes)
-            return self._store_local_asset(analysis_id, output, "image/png", output.name)
+        if isinstance(encoded, str) and encoded:
+            try:
+                image_bytes = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise SeedanceProviderError("Seedream 5.0 返回的图片数据无法解码") from exc
+            if not image_bytes:
+                raise SeedanceProviderError("Seedream 5.0 返回了空图片")
+            with tempfile.TemporaryDirectory(prefix="seedream-anchor-") as temp_dir:
+                output = Path(temp_dir) / f"segment-{int(segment['segment_id']):03d}-anchor.png"
+                output.write_bytes(image_bytes)
+                return self._store_local_asset(analysis_id, output, "image/png", output.name)
+        output_url = self._image_output_url(body)
+        if output_url:
+            return await self._store_generated_image(
+                analysis_id, int(segment["segment_id"]), output_url
+            )
+        raise SeedanceProviderError("Seedream 5.0 未返回图片结果")
+
+    @staticmethod
+    def _image_data_url(content: bytes, mime_type: str) -> str:
+        if not content:
+            raise SeedanceProviderError("图片输入为空")
+        normalized_mime = mime_type.lower().split(";", maxsplit=1)[0]
+        if normalized_mime not in {"image/jpeg", "image/jpg", "image/png", "image/webp"}:
+            raise SeedanceProviderError("不支持的产品参考图格式")
+        return f"data:{normalized_mime};base64,{base64.b64encode(content).decode('ascii')}"
 
     @staticmethod
     def _image_output_url(body: Any) -> str:
@@ -1031,46 +1122,9 @@ class SeedanceWorkspaceService:
                             async for chunk in response.aiter_bytes():
                                 destination.write(chunk)
             except httpx.HTTPError as exc:
-                raise SeedanceProviderError(f"下载图片模型结果失败：{exc}") from exc
+                raise SeedanceProviderError(f"下载 Seedream 5.0 图片结果失败：{exc}") from exc
             return self._store_local_asset(
                 analysis_id, output, "image/jpeg", output.name
-            )
-
-    def _save_shot_anchor(
-        self,
-        analysis_id: str,
-        shot: dict[str, Any],
-        prompt: str,
-        status: str,
-        anchor_file_id: str,
-        request_payload: dict[str, Any],
-        response_payload: Any,
-        error_message: str,
-    ) -> None:
-        now = int(time.time())
-        with self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO seedance_shot_visual_anchors
-                    (analysis_id, segment_id, shot_order, scene_id, start_ms, end_ms, source_frame_path,
-                     model, prompt, status, anchor_file_id, request_json, response_json, error_message,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(analysis_id, segment_id, shot_order) DO UPDATE SET
-                    scene_id = excluded.scene_id, start_ms = excluded.start_ms, end_ms = excluded.end_ms,
-                    source_frame_path = excluded.source_frame_path, model = excluded.model,
-                    prompt = excluded.prompt, status = excluded.status, anchor_file_id = excluded.anchor_file_id,
-                    request_json = excluded.request_json, response_json = excluded.response_json,
-                    error_message = excluded.error_message, updated_at = excluded.updated_at
-                """,
-                (
-                    analysis_id, int(shot["segment_id"]), int(shot["shot_order"]), int(shot["scene_id"]),
-                    int(shot["start_ms"]), int(shot["end_ms"]), str(shot["source_frame_path"]),
-                    self.gpt_image_model, prompt, status, anchor_file_id,
-                    json.dumps(request_payload, ensure_ascii=False, separators=(",", ":")),
-                    json.dumps(response_payload if isinstance(response_payload, dict) else {"raw": response_payload}, ensure_ascii=False, separators=(",", ":")),
-                    error_message, now, now,
-                ),
             )
 
     def _save_anchor(
@@ -1116,9 +1170,6 @@ class SeedanceWorkspaceService:
             raise SeedanceConfigurationError(
                 "未配置 ARK_API_KEY；请求已保存在工作台，但不会提交或产生费用"
             )
-        workspace = self.get_workspace(analysis_id)["workspace"]
-        if workspace and segment_id is None:
-            raise SeedanceWorkspaceError("请明确选择一个分段后再提交；分段模式不会批量提交")
         try:
             plan = await self.build_request_plan(analysis_id, segment_id)
         except SeedanceWorkspaceError as exc:
@@ -1153,7 +1204,7 @@ class SeedanceWorkspaceService:
                     body if isinstance(body, dict) else {"raw": body}, response.status_code, error,
                 )
                 provider_task_id = body.get("id") if isinstance(body, dict) else None
-                task_status = str(body.get("status") or "failed") if isinstance(body, dict) else "failed"
+                task_status = self._initial_task_status(body)
                 self._save_task(
                     local_task_id, analysis_id,
                     provider_task_id if isinstance(provider_task_id, str) else None,
@@ -1217,6 +1268,248 @@ class SeedanceWorkspaceService:
             int(row["created_at"]),
         )
         return self.get_workspace(analysis_id)
+
+    async def compose_completed_video(self, analysis_id: str) -> dict[str, Any]:
+        """Concatenate the latest successful render of every planned segment locally.
+
+        This is a local FFmpeg operation only: it never creates another Seedance task.
+        """
+        self._validate_analysis_id(analysis_id)
+        segments = self._load_storyboard_segments(analysis_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM seedance_tasks
+                WHERE analysis_id = ? AND status = 'succeeded'
+                ORDER BY created_at DESC
+                """,
+                (analysis_id,),
+            ).fetchall()
+
+        latest_by_segment: dict[int, sqlite3.Row] = {}
+        for row in rows:
+            segment_id = row["segment_id"]
+            if isinstance(segment_id, int) and segment_id not in latest_by_segment:
+                latest_by_segment[segment_id] = row
+
+        source_urls: list[str] = []
+        for segment in segments:
+            segment_id = int(segment["segment_id"])
+            task = latest_by_segment.get(segment_id)
+            if task is None:
+                raise SeedanceWorkspaceError(
+                    f"连续片段 {segment_id:02d} 尚未生成完成，暂时不能合成"
+                )
+            source_url = self._task_video_url(task)
+            if not source_url:
+                raise SeedanceWorkspaceError(
+                    f"连续片段 {segment_id:02d} 没有可下载的生成结果，请先刷新状态"
+                )
+            source_urls.append(source_url)
+
+        generated_output = self._safe_analysis_asset(
+            analysis_id, "storyboard_chunks/outputs/generated.mp4"
+        )
+        combined_output = self._safe_analysis_asset(
+            analysis_id, "storyboard_chunks/outputs/final.mp4"
+        )
+        comparison_output = self._safe_analysis_asset(
+            analysis_id, "storyboard_chunks/outputs/comparison.mp4"
+        )
+        original_source = self._safe_analysis_asset(analysis_id, "source.mp4")
+        if not original_source.is_file():
+            raise SeedanceWorkspaceError("原参考视频不存在，无法合并原音频和背景音乐")
+        generated_output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        generated_temporary = generated_output.with_suffix(".partial.mp4")
+        combined_temporary = combined_output.with_suffix(".partial.mp4")
+        comparison_temporary = comparison_output.with_suffix(".partial.mp4")
+        try:
+            await asyncio.to_thread(
+                self._concatenate_videos, source_urls, generated_temporary
+            )
+            generated_temporary.replace(generated_output)
+            await asyncio.to_thread(
+                self._merge_original_audio,
+                generated_output,
+                original_source,
+                combined_temporary,
+            )
+            combined_temporary.replace(combined_output)
+            await asyncio.to_thread(
+                self._build_comparison_video,
+                original_source,
+                combined_output,
+                comparison_temporary,
+            )
+            comparison_temporary.replace(comparison_output)
+        except SeedanceWorkspaceError:
+            generated_temporary.unlink(missing_ok=True)
+            combined_temporary.unlink(missing_ok=True)
+            comparison_temporary.unlink(missing_ok=True)
+            raise
+
+        return self.get_workspace(analysis_id)
+
+    def _concatenate_videos(self, source_urls: list[str], output: Path) -> None:
+        if len(source_urls) < 2:
+            raise SeedanceWorkspaceError("至少需要两个已完成的连续片段才能合成")
+        inputs: list[str] = []
+        filter_parts: list[str] = []
+        for index, source_url in enumerate(source_urls):
+            inputs.extend(["-i", source_url])
+            filter_parts.append(
+                f"[{index}:v]scale=720:1280:force_original_aspect_ratio=decrease,"
+                f"pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1[v{index}]"
+            )
+        concat_inputs = "".join(f"[v{index}]" for index in range(len(source_urls)))
+        filter_parts.append(
+            f"{concat_inputs}concat=n={len(source_urls)}:v=1:a=0,format=yuv420p[output]"
+        )
+        command = [
+            self.ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            *inputs,
+            "-filter_complex",
+            ";".join(filter_parts),
+            "-map",
+            "[output]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError as exc:
+            raise SeedanceWorkspaceError("未安装 FFmpeg，无法合成成片") from exc
+        except subprocess.CalledProcessError as exc:
+            message = exc.stderr.strip() or "未知错误"
+            raise SeedanceWorkspaceError(f"合成成片失败：{message}") from exc
+
+    def _merge_original_audio(
+        self, generated_video: Path, original_source: Path, output: Path
+    ) -> None:
+        """Keep the generated picture untouched and mux the original mixed soundtrack."""
+        command = [
+            self.ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(generated_video),
+            "-i",
+            str(original_source),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0?",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError as exc:
+            raise SeedanceWorkspaceError("未安装 FFmpeg，无法合并原音频和背景音乐") from exc
+        except subprocess.CalledProcessError as exc:
+            message = exc.stderr.strip() or "未知错误"
+            raise SeedanceWorkspaceError(f"合并原音频和背景音乐失败：{message}") from exc
+
+    def _build_comparison_video(
+        self, original_video: Path, combined_video: Path, output: Path
+    ) -> None:
+        """Render one synchronized left/right review video with only one audio track."""
+        frame_count = self._video_frame_count(combined_video)
+        filter_graph = (
+            "[0:v]scale=720:1280:force_original_aspect_ratio=decrease,"
+            "pad=720:1280:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1,setpts=PTS-STARTPTS,"
+            "tpad=stop_mode=clone:stop_duration=5[left];"
+            "[1:v]scale=720:1280:force_original_aspect_ratio=decrease,"
+            "pad=720:1280:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1,setpts=PTS-STARTPTS[right];"
+            "[left][right]hstack=inputs=2:shortest=1[video]"
+        )
+        command = [
+            self.ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(original_video),
+            "-i",
+            str(combined_video),
+            "-filter_complex",
+            filter_graph,
+            "-map",
+            "[video]",
+            "-map",
+            "1:a:0?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "22",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            "-frames:v",
+            str(frame_count),
+            str(output),
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError as exc:
+            raise SeedanceWorkspaceError("未安装 FFmpeg，无法生成左右对比预览") from exc
+        except subprocess.CalledProcessError as exc:
+            message = exc.stderr.strip() or "未知错误"
+            raise SeedanceWorkspaceError(f"生成左右对比预览失败：{message}") from exc
+
+    @staticmethod
+    def _video_frame_count(path: Path) -> int:
+        try:
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-count_frames",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=nb_read_frames",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            frame_count = int(probe.stdout.strip())
+        except (FileNotFoundError, subprocess.CalledProcessError, ValueError) as exc:
+            raise SeedanceWorkspaceError("无法读取最终合成版帧数，不能生成左右对比预览") from exc
+        if frame_count <= 0:
+            raise SeedanceWorkspaceError("最终合成版帧数无效，不能生成左右对比预览")
+        return frame_count
 
     def _save_task(
         self,
@@ -1437,17 +1730,30 @@ class SeedanceWorkspaceService:
             return {"message": response.text[:500]}
 
     @staticmethod
-    def _provider_error_message(body: Any, status_code: int) -> str:
+    def _initial_task_status(body: Any) -> str:
+        """Map an accepted asynchronous create response to a non-terminal state."""
+        if isinstance(body, dict):
+            status = body.get("status")
+            if isinstance(status, str) and status:
+                return status
+            if isinstance(body.get("id"), str) and body["id"]:
+                return "queued"
+        return "failed"
+
+    @staticmethod
+    def _provider_error_message(
+        body: Any, status_code: int, *, provider: str = "Seedance"
+    ) -> str:
         if isinstance(body, dict):
             error = body.get("error")
             if isinstance(error, dict):
                 message = error.get("message")
                 if isinstance(message, str):
-                    return f"Seedance 返回 {status_code}：{message}"
+                    return f"{provider} 返回 {status_code}：{message}"
             for key in ("message", "detail"):
                 if isinstance(body.get(key), str):
-                    return f"Seedance 返回 {status_code}：{body[key]}"
-        return f"Seedance 返回 HTTP {status_code}"
+                    return f"{provider} 返回 {status_code}：{body[key]}"
+        return f"{provider} 返回 HTTP {status_code}"
 
     @staticmethod
     def _validate_analysis_id(analysis_id: str) -> None:
@@ -1471,11 +1777,66 @@ class SeedanceWorkspaceService:
         return {
             "analysis_id": row["analysis_id"],
             "model": row["model"],
-            "prompt": row["prompt"],
+            "extra_instruction": row["extra_instruction"],
             "bindings": bindings if isinstance(bindings, list) else [],
             "version": row["version"],
             "updated_at": row["updated_at"],
         }
+
+    def _completed_video_payloads(self, analysis_id: str) -> list[dict[str, Any]]:
+        if self.shot_detection_data_path is None:
+            return []
+        candidates = (
+            ("original", "原参考视频", "原始画面、人声和背景音乐", "source.mp4"),
+            (
+                "generated",
+                "生成画面拼接版",
+                "仅包含按顺序拼接的生成画面，不含原音频",
+                "storyboard_chunks/outputs/generated.mp4",
+            ),
+            (
+                "combined",
+                "最终合成版",
+                "生成画面＋原参考视频的人声和背景音乐",
+                "storyboard_chunks/outputs/final.mp4",
+            ),
+            (
+                "comparison",
+                "左右对比预览版",
+                "左侧原参考视频，右侧最终合成版；两边按同一时间轴同步播放",
+                "storyboard_chunks/outputs/comparison.mp4",
+            ),
+        )
+        videos: list[dict[str, Any]] = []
+        for kind, label, description, asset_path in candidates:
+            path = self._safe_analysis_asset(analysis_id, asset_path)
+            if not path.is_file() or path.stat().st_size <= 0:
+                continue
+            videos.append(
+                {
+                    "kind": kind,
+                    "label": label,
+                    "description": description,
+                    "asset_path": asset_path,
+                    "bytes": path.stat().st_size,
+                    "updated_at": int(path.stat().st_mtime),
+                }
+            )
+        return videos
+
+    @staticmethod
+    def _task_video_url(row: sqlite3.Row) -> str:
+        try:
+            response = json.loads(row["response_json"])
+        except json.JSONDecodeError:
+            return ""
+        if not isinstance(response, dict):
+            return ""
+        content = response.get("content")
+        if not isinstance(content, dict):
+            return ""
+        video_url = content.get("video_url")
+        return video_url if isinstance(video_url, str) else ""
 
     @staticmethod
     def _task_payload(row: sqlite3.Row) -> dict[str, Any]:
@@ -1498,8 +1859,8 @@ class SeedanceWorkspaceService:
             "updated_at": row["updated_at"],
         }
 
-    @staticmethod
-    def _anchor_payload(row: sqlite3.Row) -> dict[str, Any]:
+    def _anchor_payload(self, row: sqlite3.Row) -> dict[str, Any]:
+        status = str(row["status"])
         try:
             response = json.loads(row["response_json"])
         except json.JSONDecodeError:
@@ -1508,29 +1869,8 @@ class SeedanceWorkspaceService:
             "segment_id": int(row["segment_id"]),
             "model": str(row["model"]),
             "prompt": str(row["prompt"]),
-            "status": str(row["status"]),
-            "anchor_file_id": str(row["anchor_file_id"]),
-            "response": response,
-            "error_message": str(row["error_message"]),
-            "updated_at": int(row["updated_at"]),
-        }
-
-    @staticmethod
-    def _shot_anchor_payload(row: sqlite3.Row) -> dict[str, Any]:
-        try:
-            response = json.loads(row["response_json"])
-        except json.JSONDecodeError:
-            response = {}
-        return {
-            "segment_id": int(row["segment_id"]),
-            "shot_order": int(row["shot_order"]),
-            "scene_id": int(row["scene_id"]),
-            "start_ms": int(row["start_ms"]),
-            "end_ms": int(row["end_ms"]),
-            "source_frame_path": str(row["source_frame_path"]),
-            "model": str(row["model"]),
-            "prompt": str(row["prompt"]),
-            "status": str(row["status"]),
+            "status": status,
+            "is_current": status == "uploaded" or str(row["model"]) == self._anchor_model_name,
             "anchor_file_id": str(row["anchor_file_id"]),
             "response": response,
             "error_message": str(row["error_message"]),

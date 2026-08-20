@@ -89,3 +89,30 @@ async def test_detect_persists_source_and_result_in_one_job_directory(tmp_path, 
     assert result["cached"] is False
     assert cached["cached"] is True
     assert download_count == 1
+
+
+@pytest.mark.asyncio
+async def test_detect_reuses_source_captured_when_the_share_link_was_resolved(tmp_path, monkeypatch):
+    original_source = tmp_path / "source.mp4"
+    _create_two_shot_video(original_source)
+    service = _service(tmp_path)
+    download_count = 0
+
+    async def copy_source(resource, destination):
+        nonlocal download_count
+        download_count += 1
+        shutil.copyfile(original_source, destination)
+
+    monkeypatch.setattr(service, "_download_video", copy_source)
+    resource = MediaResource(
+        source_url="https://cdn.example/source.mp4?temporary=1",
+        headers={},
+        kind="video",
+    )
+
+    saved = await service.capture_source("1234567890123456789", resource)
+    result = await service.detect_saved_source("1234567890123456789", saved["analysis_id"])
+
+    assert download_count == 1
+    assert result["analysis_id"] == saved["analysis_id"]
+    assert (tmp_path / "shot_detection" / saved["analysis_id"] / "source.mp4").is_file()

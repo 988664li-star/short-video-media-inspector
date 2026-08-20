@@ -25,11 +25,13 @@ class ShotDetectionStore:
         scene_threshold: float,
         min_shot_seconds: float,
     ) -> str:
+        # 平台 CDN 地址带签名且会频繁变化；同一作品不能因为重新解析到
+        # 新 URL 就失去已经落盘的源视频。作品 ID 才是本地素材的稳定标识。
+        del source_url
         value = "|".join(
             (
                 aweme_id,
-                source_url,
-                "pyscenedetect-content-v1",
+                "pyscenedetect-local-source-v2",
                 str(scene_threshold),
                 str(min_shot_seconds),
             )
@@ -68,7 +70,9 @@ class ShotDetectionStore:
                 result_path = job_path / "scenes.json"
                 if (job_path / ".active").exists():
                     continue
-                if result_path.is_file() and self.is_expired(result_path):
+                source_path = job_path / "source.mp4"
+                expires_at = result_path if result_path.is_file() else source_path
+                if expires_at.is_file() and self.is_expired(expires_at):
                     shutil.rmtree(job_path)
                     removed += 1
             except OSError:
@@ -85,7 +89,8 @@ class ShotDetectionStore:
         except ValueError:
             return None
         if not relative_to_job.parts or (
-            not relative_to_job.parts[0].startswith("scene_")
+            relative_to_job.as_posix() != "source.mp4"
+            and not relative_to_job.parts[0].startswith("scene_")
             and relative_to_job.parts[0] != "storyboard_chunks"
         ):
             return None

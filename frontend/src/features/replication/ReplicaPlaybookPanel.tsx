@@ -5,12 +5,14 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 import {
   bindSeedanceAnchorImage,
+  composeSeedanceTasks,
   getSeedanceAnchorImagePreviews,
+  getSeedanceGenerationReview,
   getSeedanceWorkspace,
   generateSeedanceAnchorImage,
   listArkFiles,
@@ -30,6 +32,8 @@ import type {
   SeedanceReplacementBinding,
   SeedanceModelId,
   SeedanceAnchorImagePreview,
+  SeedanceGenerationReviewSegment,
+  SeedanceCompletedVideo,
   SeedanceVisualAnchor,
   SeedanceTask,
   StoryboardScriptResult,
@@ -39,8 +43,13 @@ import {
   SeedanceTaskList,
   SegmentSubmitList,
 } from "./SeedanceOperations";
+import { GenerationReviewPackage } from "./GenerationReviewPackage";
+import type { ReplacementWorkflowStep } from "./ReplacementWorkflowTabs";
 
 interface ReplicaPlaybookPanelProps {
+  activeStep: ReplacementWorkflowStep;
+  onStepChange: (step: ReplacementWorkflowStep) => void;
+  onUnlockStep: (step: ReplacementWorkflowStep) => void;
   result: ReplicaPlaybookResult;
   storyboardScript: StoryboardScriptResult | null;
   sourceAssetBaseUrl: string;
@@ -50,19 +59,21 @@ interface ReplacementBinding {
   targetDescription: string;
   assets: Array<SeedanceReferenceAsset | null>;
 }
-interface ReferenceAsset extends SeedanceReferenceAsset {
-  candidateId: string;
-  token: string;
-}
 const MAX_REFERENCE_IMAGES = 3;
 const DEFAULT_SEEDANCE_MODEL: SeedanceModelId =
   "doubao-seedance-2-0-mini-260615";
+const SEEDANCE_MODEL_OPTIONS: Array<{
+  value: SeedanceModelId;
+  label: string;
+  description: string;
+}> = [
+  { value: "doubao-seedance-2-0-mini-260615", label: "Seedance 2.0 Mini", description: "成本更低，适合先验证效果" },
+  { value: "doubao-seedance-2-0-fast-260128", label: "Seedance 2.0 Fast", description: "生成更快，适合快速迭代" },
+  { value: "doubao-seedance-2-0-260128", label: "Seedance 2.0 标准", description: "更适合最终成片" },
+];
 
 function referenceSlotLabel(type: ReplacementCandidate["type"], index: number) {
   return `${type === "product" ? "目标产品" : "目标对象"}参考图 ${index + 1}`;
-}
-function chineseLetter(index: number) {
-  return String.fromCodePoint("A".codePointAt(0)! + index);
 }
 function formatRanges(candidate: ReplacementCandidate) {
   return (candidate.time_ranges_ms ?? [])
@@ -127,70 +138,6 @@ function restoreBindings(
 function hasReferenceImage(binding: ReplacementBinding | undefined) {
   return binding?.assets.some((asset) => Boolean(asset?.file_id)) ?? false;
 }
-function collectReferenceAssets(
-  candidates: ReplacementCandidate[],
-  bindings: Record<string, ReplacementBinding>,
-) {
-  const assets: ReferenceAsset[] = [];
-  candidates.forEach((candidate) => {
-    const binding = bindings[candidate.candidate_id];
-    if (!binding?.enabled) return;
-    binding.assets.forEach((asset, index) => {
-      if (!asset?.file_id) return;
-      assets.push({
-        ...asset,
-        candidateId: candidate.candidate_id,
-        slot_index: index,
-        token: `@图片${assets.length + 1}`,
-      });
-    });
-  });
-  return assets;
-}
-
-function createSd2PeVideoEditPrompt(
-  candidates: ReplacementCandidate[],
-  bindings: Record<string, ReplacementBinding>,
-  referenceTokens: Map<string, string>,
-) {
-  const selected = candidates.filter(
-    (candidate) =>
-      bindings[candidate.candidate_id]?.enabled &&
-      hasReferenceImage(bindings[candidate.candidate_id]),
-  );
-  if (!selected.length)
-    return "请选择至少一个可替换对象，并上传或选择对应参考图；未绑定素材的对象保持源视频不变。";
-  const typeCounts = new Map<ReplacementCandidate["type"], number>();
-  const subjectNames = new Map<string, string>();
-  selected.forEach((candidate) => {
-    const ordinal = typeCounts.get(candidate.type) ?? 0;
-    typeCounts.set(candidate.type, ordinal + 1);
-    subjectNames.set(
-      candidate.candidate_id,
-      `商品${chineseLetter(ordinal)}`,
-    );
-  });
-  const materialDefinitions = selected.map((candidate) => {
-    const binding = bindings[candidate.candidate_id];
-    const imageTokens = binding.assets.flatMap((asset, index) => {
-      if (!asset?.file_id) return [];
-      return [
-        referenceTokens.get(`${candidate.candidate_id}:${index}`) ??
-          `@图片${index + 1}`,
-      ];
-    });
-    const targetDescription = binding.targetDescription.trim();
-    const fallback = candidate.type === "product" ? "目标产品" : "目标对象";
-    return `将${imageTokens.map((token) => `${token} 中展示的${targetDescription || fallback}`).join("、")}定义为${subjectNames.get(candidate.candidate_id)}。`;
-  });
-  const editCommands = selected.map(
-    (candidate) =>
-      `将其中的“${candidate.source_description}”替换为${subjectNames.get(candidate.candidate_id)}`,
-  );
-  const hasPerson = selected.some((candidate) => candidate.type === "person");
-  return `${materialDefinitions.join(" ")} 严格编辑 @视频1，${editCommands.join("；")}，保持原视频的动作和运镜不变，未提及部分保持不变。高清，细节丰富，电影质感，色彩自然，光影柔和；${hasPerson ? "人物面部稳定不变形、五官清晰，" : "画面稳定无变形，"}动作连贯自然，不僵硬，无穿模无卡顿；保持无字幕，不要生成水印，不要生成 Logo。`;
-}
-
 interface ArkFilePickerProps {
   selectedId: string;
   files: ArkFile[];
@@ -304,7 +251,6 @@ interface ReferenceImageUploaderProps {
   onSelect: (index: number, file: ArkFile | null) => void;
   onUpload: (index: number, file: File) => void;
   onTargetDescriptionChange: (value: string) => void;
-  referenceTokens: Array<string | undefined>;
 }
 function ReferenceImageUploader({
   candidate,
@@ -316,7 +262,6 @@ function ReferenceImageUploader({
   onUpload,
   targetDescription,
   onTargetDescriptionChange,
-  referenceTokens,
 }: ReferenceImageUploaderProps) {
   const isProduct = candidate.type === "product";
   return (
@@ -347,7 +292,7 @@ function ReferenceImageUploader({
           <ArkFilePicker
             key={index}
             compact
-            label={`${referenceTokens[index] ?? `@图片${index + 1}`} · ${referenceSlotLabel(candidate.type, index)}`}
+            label={referenceSlotLabel(candidate.type, index)}
             selectedId={assets[index]?.file_id ?? ""}
             files={files}
             previewUrl={
@@ -367,6 +312,7 @@ function ReferenceImageUploader({
 
 function SegmentAnchorStage({
   sourceAssetBaseUrl,
+  segments,
   previews,
   anchors,
   files,
@@ -381,6 +327,7 @@ function SegmentAnchorStage({
   onUpload,
 }: {
   sourceAssetBaseUrl: string;
+  segments: StoryboardScriptResult["segments"];
   previews: SeedanceAnchorImagePreview[];
   anchors: SeedanceVisualAnchor[];
   files: ArkFile[];
@@ -395,13 +342,16 @@ function SegmentAnchorStage({
   onUpload: (segmentId: number, file: File) => void;
 }) {
   const bySegment = new Map(anchors.map((anchor) => [anchor.segment_id, anchor]));
+  const shotCountBySegment = new Map(
+    segments.map((segment) => [segment.segment_id, segment.storyboard.length]),
+  );
   return (
     <section className="segment-anchor-stage">
       <div className="segment-anchor-stage__heading">
         <div>
-          <h4>图片锚点处理</h4>
+          <h4>连续片段拼图替换 · 豆包 Seedream 5.0</h4>
           <p>
-            这是独立的 GPT Image 2 分段合并图编辑步骤，不会生成视频。每个不超过 15 秒的分段，将其多个镜头合并图只处理一次，得到一张“产品已替换正确”的分段锚点图；也可上传或选择你手工处理好的合并图覆盖结果。确认图片正确后，下一步视频模型只使用该分段锚点图。
+            每个连续片段最多 15 秒。系统会把多个关键帧合成一张锚点图，并调用豆包 Seedream 5.0 处理，用于保持替换后的商品在整段视频中一致。
           </p>
         </div>
         <Button
@@ -410,12 +360,12 @@ function SegmentAnchorStage({
           onClick={onRefreshPreviews}
           icon={previewsLoading ? <LoaderCircle className="spin" /> : <RefreshCw />}
         >
-          {previewsLoading ? "正在读取处理细节" : "刷新图片处理预览"}
+          {previewsLoading ? "正在准备片段" : "准备片段锚点"}
         </Button>
       </div>
       <label className="segment-anchor-stage__confirm">
         <input checked={confirmed} onChange={(event) => onConfirmedChange(event.target.checked)} type="checkbox" />
-        我确认仅在点击“GPT Image 2 编辑”时调用图片模型并可能计费；上传或选择已有图片不计费。
+        我确认仅在点击“生成锚点图”时调用豆包 Seedream 5.0 图片编辑并可能计费；上传或选择已有图片不计费。
       </label>
       {previews.length ? <ul className="segment-anchor-stage__list">
         {previews.map((preview) => {
@@ -423,47 +373,35 @@ function SegmentAnchorStage({
           const file = files.find((item) => item.id === anchor?.anchor_file_id);
           const key = String(preview.segment_id);
           const isGenerating = generatingSegmentId === preview.segment_id;
+          const needsRegeneration = anchor?.status === "succeeded" && !anchor.is_current;
           return (
             <li key={key}>
               <div className="segment-anchor-stage__summary">
                 <div>
-                  <b>分段 {String(preview.segment_id).padStart(2, "0")} · 合并分镜图</b>
+                  <b>连续片段 {String(preview.segment_id).padStart(2, "0")} · {shotCountBySegment.get(preview.segment_id) ?? 0} 个镜头完整合成 1 张图</b>
                   <span>
                     {formatShotTimestamp(preview.start_ms / 1000)}–{formatShotTimestamp(preview.end_ms / 1000)}
                   </span>
-                  <small>{anchor ? `${anchor.status === "uploaded" ? "手工锚点图" : "AI 锚点图"} · ${assetStatusLabel(anchor.status)}` : "尚未处理"}</small>
+                  <small>{anchor ? needsRegeneration ? "旧版锚点图 · 需要按当前规则重新生成" : `${anchor.status === "uploaded" ? "手工锚点图" : "Seedream 5.0 锚点图"} · ${assetStatusLabel(anchor.status)}` : "尚未处理"}</small>
                   {file?.download_url ? (
                     <a href={file.download_url} target="_blank" rel="noreferrer">查看最终锚点图</a>
                   ) : null}
                   {anchor?.error_message ? <p>{publicErrorMessage(anchor.error_message, "图片处理失败，请稍后重试。")}</p> : null}
                 </div>
-                <div className="segment-anchor-stage__detail-grid">
-                  <figure>
-                    <figcaption>图1 · 原始合并分镜图（将被编辑）</figcaption>
-                    <img
-                      src={`${sourceAssetBaseUrl}/${preview.source_frame_path}`}
-                      alt={`分段 ${preview.segment_id} 的原始合并分镜图`}
-                    />
-                  </figure>
-                  <div className="segment-anchor-stage__prompt">
-                    <b>{anchor?.status === "succeeded" ? "本次生成实际使用的图片提示词" : "将发送给图片模型的提示词"}</b>
-                    {anchor?.status === "succeeded" ? <pre>{anchor.prompt}</pre> : preview.ready ? <pre>{preview.prompt}</pre> : <p>{preview.message}</p>}
-                    {preview.inputs.length ? (
-                      <ol>
-                        {preview.inputs.map((input) => {
-                          const referenceFile = input.file_id ? files.find((item) => item.id === input.file_id) : undefined;
-                          return <li key={`${input.image_index}:${input.file_id ?? input.source_frame_path ?? "source"}`}><code>{`图${input.image_index}`}</code>{input.kind === "source_contact_sheet" ? " 原始合并分镜图" : ` ${referenceFile?.filename ?? "目标产品参考图"}`}</li>;
-                        })}
-                      </ol>
-                    ) : null}
-                  </div>
-                  {file?.download_url ? (
+                <details className="segment-anchor-stage__details">
+                  <summary>查看拼图与处理详情</summary>
+                  <div className="segment-anchor-stage__detail-grid">
                     <figure>
-                      <figcaption>最终锚点图（视频阶段将使用）</figcaption>
-                      <img src={file.download_url} alt={`分段 ${preview.segment_id} 的最终合并分镜锚点图`} />
+                      <figcaption>原始关键帧拼图</figcaption>
+                      <img src={`${sourceAssetBaseUrl}/${preview.source_frame_path}`} alt={`分段 ${preview.segment_id} 的原始合并分镜图`} />
                     </figure>
-                  ) : null}
-                </div>
+                    <div className="segment-anchor-stage__prompt">
+                      <b>{anchor?.status === "succeeded" && !needsRegeneration ? "本次使用的图片指令" : "图片处理指令"}</b>
+                      {anchor?.status === "succeeded" && !needsRegeneration ? <pre>{anchor.prompt}</pre> : preview.ready ? <pre>{preview.prompt}</pre> : <p>{preview.message}</p>}
+                    </div>
+                    {file?.download_url ? <figure><figcaption>最终锚点图</figcaption><img src={file.download_url} alt={`分段 ${preview.segment_id} 的最终合并分镜锚点图`} /></figure> : null}
+                  </div>
+                </details>
               </div>
               <div className="segment-anchor-stage__actions">
                 <Button
@@ -472,7 +410,7 @@ function SegmentAnchorStage({
                   onClick={() => onGenerate(preview.segment_id, anchor?.status === "succeeded")}
                   icon={isGenerating ? <LoaderCircle className="spin" /> : <ImagePlus />}
                 >
-                  {isGenerating ? "正在编辑图片" : anchor?.status === "succeeded" ? "重新编辑图片" : "GPT Image 2 编辑"}
+                  {isGenerating ? "正在生成锚点图" : needsRegeneration ? "按当前规则重新生成" : anchor?.status === "succeeded" ? "重新生成锚点图" : "生成锚点图"}
                 </Button>
                 <ArkFilePicker
                   compact
@@ -487,12 +425,15 @@ function SegmentAnchorStage({
             </li>
           );
         })}
-      </ul> : <p className="seedance-workbench__hint">点击“刷新图片处理预览”后，系统会列出每个分段的原始合并分镜图及精确编辑提示词；不调用图片模型。</p>}
+      </ul> : <p className="seedance-workbench__hint">点击“准备片段锚点”后，系统会列出每个连续片段；这一步不会调用图片模型。</p>}
     </section>
   );
 }
 
 export function ReplicaPlaybookPanel({
+  activeStep,
+  onStepChange,
+  onUnlockStep,
   result,
   storyboardScript,
   sourceAssetBaseUrl,
@@ -512,39 +453,25 @@ export function ReplicaPlaybookPanel({
     {},
   );
   const localPreviewsRef = useRef<Record<string, string>>({});
-  const [prompt, setPrompt] = useState("");
+  const [extraInstruction, setExtraInstruction] = useState("");
+  const [model, setModel] = useState<SeedanceModelId>(DEFAULT_SEEDANCE_MODEL);
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [workspaceError, setWorkspaceError] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [tasks, setTasks] = useState<SeedanceTask[]>([]);
+  const [completedVideos, setCompletedVideos] = useState<SeedanceCompletedVideo[]>([]);
   const [anchors, setAnchors] = useState<SeedanceVisualAnchor[]>([]);
   const [anchorPreviews, setAnchorPreviews] = useState<SeedanceAnchorImagePreview[]>([]);
   const [anchorPreviewsLoading, setAnchorPreviewsLoading] = useState(false);
+  const [generationReview, setGenerationReview] = useState<SeedanceGenerationReviewSegment[]>([]);
+  const [generationReviewLoading, setGenerationReviewLoading] = useState(false);
   const [generatingAnchorSegmentId, setGeneratingAnchorSegmentId] = useState<number | null>(null);
   const [imageConfirmed, setImageConfirmed] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submittingSegmentId, setSubmittingSegmentId] = useState<number | null>(null);
   const [refreshingTaskId, setRefreshingTaskId] = useState("");
-  const referenceAssets = useMemo(
-    () => collectReferenceAssets(candidates, bindings),
-    [bindings, candidates],
-  );
-  const referenceTokens = useMemo(
-    () =>
-      new Map(
-        referenceAssets.map((asset) => [
-          `${asset.candidateId}:${asset.slot_index}`,
-          asset.token,
-        ]),
-      ),
-    [referenceAssets],
-  );
-  const generatedPrompt = useMemo(
-    () => createSd2PeVideoEditPrompt(candidates, bindings, referenceTokens),
-    [bindings, candidates, referenceTokens],
-  );
   const loadArkFiles = useCallback(async () => {
     if (!analysisId) return;
     setFilesLoading(true);
@@ -562,8 +489,8 @@ export function ReplicaPlaybookPanel({
     async (showMessage: boolean) => {
       if (!analysisId || !workspaceReady) return false;
       const payload: SeedanceWorkspaceInput = {
-        model: DEFAULT_SEEDANCE_MODEL,
-        prompt,
+        model,
+        extra_instruction: extraInstruction,
         bindings: normalizeBindings(bindings),
       };
       setWorkspaceSaving(true);
@@ -572,8 +499,9 @@ export function ReplicaPlaybookPanel({
         const response = await saveSeedanceWorkspace(analysisId, payload);
         setTasks(response.tasks);
         setAnchors(response.anchors ?? []);
+        setCompletedVideos(response.completed_videos ?? []);
         if (showMessage)
-          setWorkspaceMessage("已保存素材绑定和提示词；刷新页面后仍会保留。");
+          setWorkspaceMessage("已保存素材绑定和补充要求；刷新页面后仍会保留。");
         return true;
       } catch (saveError) {
         setWorkspaceError(
@@ -584,7 +512,7 @@ export function ReplicaPlaybookPanel({
       }
       return false;
     },
-    [analysisId, bindings, prompt, workspaceReady],
+    [analysisId, bindings, extraInstruction, model, workspaceReady],
   );
   useEffect(() => {
     if (!analysisId) {
@@ -599,9 +527,11 @@ export function ReplicaPlaybookPanel({
         if (!active) return;
         const workspace = workspaceResponse.workspace;
         setBindings(workspace ? restoreBindings(workspace.bindings) : {});
-        setPrompt(workspace?.prompt ?? "");
+        setExtraInstruction(workspace?.extra_instruction ?? "");
+        setModel(workspace?.model ?? DEFAULT_SEEDANCE_MODEL);
         setTasks(workspaceResponse.tasks);
         setAnchors(workspaceResponse.anchors ?? []);
+        setCompletedVideos(workspaceResponse.completed_videos ?? []);
         setWorkspaceReady(true);
       })
       .catch((loadError) => {
@@ -626,8 +556,8 @@ export function ReplicaPlaybookPanel({
     };
   }, [analysisId]);
   useEffect(() => {
-    if (workspaceReady) setPrompt(generatedPrompt);
-  }, [generatedPrompt, workspaceReady]);
+    setGenerationReview([]);
+  }, [bindings, extraInstruction, model]);
   useEffect(() => {
     if (!workspaceReady || !analysisId) return undefined;
     const timer = window.setTimeout(() => {
@@ -638,7 +568,8 @@ export function ReplicaPlaybookPanel({
     analysisId,
     bindings,
     persistWorkspace,
-    prompt,
+    extraInstruction,
+    model,
     workspaceReady,
   ]);
   useEffect(
@@ -733,6 +664,7 @@ export function ReplicaPlaybookPanel({
       const response = await getSeedanceWorkspace(analysisId);
       setTasks(response.tasks);
       setAnchors(response.anchors ?? []);
+      setCompletedVideos(response.completed_videos ?? []);
     } catch {
       /* Keep the original action error when a background status refresh also fails. */
     }
@@ -744,13 +676,31 @@ export function ReplicaPlaybookPanel({
       if (!(await persistWorkspace(false))) return;
       const response = await getSeedanceAnchorImagePreviews(analysisId);
       setAnchorPreviews(response.previews);
-      setWorkspaceMessage("已读取图片处理的原图、素材顺序和精确提示词；未调用图片模型，不计费。");
+      setWorkspaceMessage("已准备连续片段锚点；尚未调用图片模型，不计费。");
     } catch (previewError) {
       setWorkspaceError(
         previewError instanceof Error ? previewError.message : "读取图片处理预览失败",
       );
     } finally {
       setAnchorPreviewsLoading(false);
+    }
+  }
+  async function loadGenerationReview() {
+    setGenerationReviewLoading(true);
+    setWorkspaceError("");
+    try {
+      if (!(await persistWorkspace(false))) return;
+      const response = await getSeedanceGenerationReview(analysisId);
+      setGenerationReview(response.segments);
+      setWorkspaceMessage("已准备可审查的片段视频、锚点图、商品参考图和最终指令；未调用模型，不计费。");
+    } catch (instructionError) {
+      setWorkspaceError(
+        instructionError instanceof Error
+          ? instructionError.message
+          : "准备生成审查包失败",
+      );
+    } finally {
+      setGenerationReviewLoading(false);
     }
   }
   async function submitTask(segmentId?: number) {
@@ -762,6 +712,7 @@ export function ReplicaPlaybookPanel({
       const response = await submitSeedanceTask(analysisId, segmentId);
       setTasks(response.tasks);
       setAnchors(response.anchors ?? []);
+      setCompletedVideos(response.completed_videos ?? []);
       setWorkspaceMessage(
         segmentId === undefined
           ? "已提交生成；可使用下方“刷新状态”查看结果。"
@@ -786,6 +737,7 @@ export function ReplicaPlaybookPanel({
     try {
       const response = await refreshSeedanceTask(analysisId, localTaskId);
       setTasks(response.tasks);
+      setCompletedVideos(response.completed_videos ?? []);
     } catch (refreshError) {
       setWorkspaceError(
         refreshError instanceof Error ? refreshError.message : "刷新任务失败",
@@ -804,7 +756,7 @@ export function ReplicaPlaybookPanel({
       setTasks(response.tasks);
       setAnchors(response.anchors ?? []);
       await loadArkFiles();
-      setWorkspaceMessage(`分段 ${String(segmentId).padStart(2, "0")} 的 GPT Image 2 合并分镜锚点图已生成。`);
+      setWorkspaceMessage(`连续片段 ${String(segmentId).padStart(2, "0")} 的锚点图已生成。`);
     } catch (anchorError) {
       setWorkspaceError(anchorError instanceof Error ? anchorError.message : "生成分段视觉锚点图失败");
       await refreshWorkspaceState();
@@ -832,18 +784,78 @@ export function ReplicaPlaybookPanel({
       void bindAnchor(segmentId, arkFile);
     });
   }
+  const hasReadyProduct = candidates.some(
+    (candidate) =>
+      bindings[candidate.candidate_id]?.enabled &&
+      hasReferenceImage(bindings[candidate.candidate_id]),
+  );
+  const anchorsReady = Boolean(
+    storyboardScript?.segments.length &&
+      storyboardScript.segments.every((segment) =>
+        anchors.some(
+          (anchor) =>
+            anchor.segment_id === segment.segment_id &&
+            ["succeeded", "uploaded"].includes(anchor.status) &&
+            anchor.is_current &&
+            Boolean(anchor.anchor_file_id),
+        ),
+      ),
+  );
+  const allSegmentsCompleted = Boolean(
+    storyboardScript?.segments.length &&
+      storyboardScript.segments.every((segment) =>
+        tasks.some(
+          (task) => task.segment_id === segment.segment_id && task.status === "succeeded",
+        ),
+      ),
+  );
+  async function composeFinalVideo() {
+    setSubmitting(true);
+    setWorkspaceError("");
+    try {
+      const response = await composeSeedanceTasks(analysisId);
+      setTasks(response.tasks);
+      setAnchors(response.anchors ?? []);
+      setCompletedVideos(response.completed_videos ?? []);
+      setWorkspaceMessage("已合成完整成片，并保留原视频的人声和背景音乐。");
+    } catch (composeError) {
+      setWorkspaceError(
+        composeError instanceof Error ? composeError.message : "合成成片失败",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function continueFromProducts() {
+    if (!hasReadyProduct) {
+      setWorkspaceError("请至少选择一个商品，并上传一张清晰的目标产品图。");
+      return;
+    }
+    if (await persistWorkspace(true)) {
+      onUnlockStep(3);
+      onStepChange(3);
+    }
+  }
+  function continueFromAnchors() {
+    if (!anchorsReady) {
+      setWorkspaceError("请为每个连续片段生成或上传一张最终锚点图后再继续。");
+      return;
+    }
+    onUnlockStep(4);
+    onStepChange(4);
+  }
   return (
-    <div className="replica-tab-content replica-playbook">
-      <div className="replica-playbook__scroll replacement-workbench">
-          {playbook.source_summary ? (
-            <section>
-              <h4>源视频替换范围</h4>
-              <p>{playbook.source_summary}</p>
-            </section>
-          ) : null}
-          <section>
+    <div className="replica-playbook replacement-workbench">
+      {workspaceError ? <p className="shot-detection__message shot-detection__message--error" role="alert">{workspaceError}</p> : null}
+      {activeStep === 2 ? (
+        <>
+          <section className="replacement-wizard__stage">
+            <div className="replacement-wizard__stage-copy">
+              <h4>选择需要替换的商品</h4>
+              <p>勾选源视频里的商品，上传你的商品图。系统只改你选择的商品，人物、背景和镜头节奏保持不变。</p>
+            </div>
             <div className="replacement-section-heading">
-              <h4>确认要替换的商品</h4>
+              <span>识别到 {candidates.length} 个可替换商品</span>
               <Button
                 variant="text"
                 disabled={filesLoading}
@@ -881,19 +893,10 @@ export function ReplicaPlaybookPanel({
                         />
                         <span>
                           <b>商品 {candidateIndex + 1}</b>
-                          <small>
-                            镜头{" "}
-                            {(candidate.scene_ids ?? [])
-                              .map((id) => String(id).padStart(2, "0"))
-                              .join("、") || "待确认"}{" "}
-                            · {formatRanges(candidate) || "待确认"}
-                          </small>
+                          <small>出现时间 · {formatRanges(candidate) || "待确认"}</small>
                         </span>
                       </label>
                       <p>{candidate.source_description}</p>
-                      <p className="replacement-candidate__reason">
-                        {candidate.replacement_reason}
-                      </p>
                       {enabled ? (
                         <ReferenceImageUploader
                           candidate={candidate}
@@ -922,18 +925,11 @@ export function ReplicaPlaybookPanel({
                               targetDescription: value,
                             })
                           }
-                          referenceTokens={Array.from(
-                            { length: MAX_REFERENCE_IMAGES },
-                            (_, index) =>
-                              referenceTokens.get(
-                                `${candidate.candidate_id}:${index}`,
-                              ),
-                          )}
                         />
                       ) : null}
                       {enabled && !hasReferenceImage(binding) ? (
                         <p className="replacement-candidate__warning">
-                          请上传至少一张商品图；未绑定素材时不会生成替换片段。
+                          请至少上传一张清晰的商品图。
                         </p>
                       ) : null}
                     </li>
@@ -941,12 +937,25 @@ export function ReplicaPlaybookPanel({
                 })}
               </ul>
             ) : (
-            <p>未识别到可稳定替换的商品。建议更换参考视频，或重新识别镜头。</p>
+            <p>没有识别到稳定可替换的商品。请返回上一步重新分析，或更换参考视频。</p>
             )}
+            <div className="replacement-wizard__footer">
+              <Button variant="secondary" onClick={() => onStepChange(1)}>上一步</Button>
+              <Button variant="primary" disabled={!hasReadyProduct || workspaceSaving} onClick={() => void continueFromProducts()}>{workspaceSaving ? "正在保存" : "保存并继续"}</Button>
+            </div>
           </section>
+        </>
+      ) : null}
+      {activeStep === 3 ? (
+        <section className="replacement-wizard__stage">
+          <div className="replacement-wizard__stage-copy">
+            <h4>生成连续片段锚点</h4>
+            <p>每个片段只处理一次关键帧拼图，不会逐镜头调用 AI。确认锚点图正确后，下一步生成整段视频。</p>
+          </div>
           {storyboardScript ? (
             <SegmentAnchorStage
               sourceAssetBaseUrl={sourceAssetBaseUrl}
+              segments={storyboardScript.segments}
               anchors={anchors}
               previews={anchorPreviews}
               files={arkFiles}
@@ -960,37 +969,96 @@ export function ReplicaPlaybookPanel({
               onBind={(segmentId, file) => void bindAnchor(segmentId, file)}
               onUpload={(segmentId, file) => void uploadAnchor(segmentId, file)}
             />
+          ) : <p>连续片段尚未准备好，请返回第一步重新分析。</p>}
+          <div className="replacement-wizard__footer">
+            <Button variant="secondary" onClick={() => onStepChange(2)}>上一步</Button>
+            <Button variant="primary" disabled={!anchorsReady} onClick={continueFromAnchors}>继续：检查并生成</Button>
+          </div>
+        </section>
+      ) : null}
+      {activeStep === 4 ? (
+        <section className="replacement-wizard__stage">
+          <div className="replacement-wizard__stage-copy">
+            <h4>检查最终指令并生成</h4>
+            <p>先查看每个连续片段的最终模型指令，确认后再提交生成。只有点击生成才会调用视频模型并可能产生费用。</p>
+          </div>
+          {!anchorsReady ? (
+            <p className="shot-detection__message shot-detection__message--error">
+              当前锚点图不是最新规则版本。请返回上一步，逐段点击“按当前规则重新生成”后再提交；这一步会调用图片模型并可能计费。
+            </p>
           ) : null}
           <section className="seedance-workbench">
             <div className="seedance-workbench__heading">
               <div>
-                <h4>准备逐镜头生成</h4>
+                <h4>当前配置</h4>
                 <p>
-                  你确认商品图和镜头锚点后，系统会为每个镜头单独生成，方便逐段检查效果。
+                  商品图、锚点图和补充要求会自动保存。
                 </p>
               </div>
             </div>
             <p className="seedance-workbench__hint">
-              商品图、镜头锚点和生成要求会自动保存。当前使用固定生成配置，避免同一项目因模型切换产生不一致结果。
+              这些配置会自动保存；刷新页面后可以继续当前进度。
             </p>
+            <label className="seedance-model-field">
+              <span>生成模型</span>
+              <select value={model} onChange={(event) => setModel(event.target.value as SeedanceModelId)} aria-label="选择视频生成模型">
+                {SEEDANCE_MODEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label} · {option.description}</option>)}
+              </select>
+            </label>
             <div className="seedance-workbench__actions">
               <span>{workspaceSaving ? "正在保存当前设置…" : "当前设置会自动保存"}</span>
               {workspaceMessage ? <span>{workspaceMessage}</span> : null}
             </div>
-            {workspaceError ? (
-              <p
-                className="shot-detection__message shot-detection__message--error"
-                role="alert"
+          </section>
+          <section className="generation-instructions">
+            <div className="generation-instructions__heading">
+              <div>
+                <h4>补充要求（可选）</h4>
+                <p>商品、源商品描述、连续片段时间和参考图由后端模板注入。这里仅填写本项目额外要求，例如“产品始终保持亮灯”。</p>
+              </div>
+            </div>
+            <textarea
+              className="generation-instructions__editor"
+              value={extraInstruction}
+              onChange={(event) => setExtraInstruction(event.target.value)}
+              spellCheck={false}
+              aria-label="视频生成补充要求"
+              placeholder="例如：产品在所有镜头中保持暖白色夜灯亮起；不要改变原视频节奏。"
+            />
+          </section>
+          <section className="generation-instructions">
+            <div className="generation-instructions__heading">
+              <div>
+                <h4>提交前审查</h4>
+                <p>这里会展示每段实际上传的视频、最终锚点图、商品参考图和模型指令。准备素材不会调用模型或计费。</p>
+              </div>
+              <Button
+                variant="text"
+                disabled={generationReviewLoading}
+                onClick={() => void loadGenerationReview()}
+                icon={generationReviewLoading ? <LoaderCircle className="spin" /> : <RefreshCw />}
               >
-                {workspaceError}
-              </p>
-            ) : null}
+                {generationReviewLoading ? "正在准备审查包" : "准备审查包"}
+              </Button>
+            </div>
+            <GenerationReviewPackage segments={generationReview} />
           </section>
           <section className="seedance-submit">
-            <h4>提交生成</h4>
+            <h4>开始生成</h4>
             <p>
-              只有点击提交才会创建视频生成任务并可能计费。系统不会自动重试或自动发起下一次生成。
+              系统会按连续片段生成：每段包含多个镜头，但只创建一个视频任务。只有点击生成才会产生费用。
             </p>
+            {!anchorsReady ? (
+              <div className="seedance-submit__blocked">
+                <div>
+                  <b>请先更新两个连续片段的锚点图</b>
+                  <span>当前锚点来自旧规则，不能与新的“原视频＋锚点图＋商品参考图”提交方式混用。</span>
+                </div>
+                <Button variant="secondary" onClick={() => onStepChange(3)}>
+                  去重新生成锚点
+                </Button>
+              </div>
+            ) : null}
             <label>
               <input
                 type="checkbox"
@@ -1002,16 +1070,38 @@ export function ReplicaPlaybookPanel({
             {storyboardScript ? (
               <>
                 <p className="seedance-submit__notice">
-                  每次只能提交一个分段。点击分段 01 不会提交分段 02；每个分段会独立创建任务并独立计费。
+                  你可以一次生成全部 {storyboardScript.segments.length} 个连续片段，也可以在下方按需单独生成。
                 </p>
+                <Button
+                  variant="primary"
+                  disabled={submitting || !workspaceReady || !confirmed || !anchorsReady}
+                  onClick={() => void submitTask()}
+                  icon={submitting && submittingSegmentId === null ? <LoaderCircle className="spin" /> : <ImagePlus />}
+                >
+                  {submitting && submittingSegmentId === null
+                    ? "正在创建生成任务"
+                    : `生成全部 ${storyboardScript.segments.length} 个连续片段`}
+                </Button>
+                <Button
+                  variant="text"
+                  disabled={anchorPreviewsLoading}
+                  onClick={() => void refreshAnchorPreviews()}
+                  icon={anchorPreviewsLoading ? <LoaderCircle className="spin" /> : <RefreshCw />}
+                >
+                  {anchorPreviewsLoading ? "正在加载片段拼图提示词" : "加载片段拼图提示词"}
+                </Button>
+                <details className="seedance-submit__segments">
+                  <summary>逐片段生成或重试</summary>
                 <SegmentSubmitList
                   segments={storyboardScript.segments}
                   tasks={tasks}
+                  anchorPreviews={anchorPreviews}
                   confirmed={confirmed}
                   submittingSegmentId={submittingSegmentId}
-                  disabled={submitting || !workspaceReady}
+                  disabled={submitting || !workspaceReady || !anchorsReady}
                   onSubmit={(segmentId) => void submitTask(segmentId)}
                 />
+                </details>
               </>
             ) : null}
             <SeedanceTaskList
@@ -1019,8 +1109,45 @@ export function ReplicaPlaybookPanel({
               refreshingTaskId={refreshingTaskId}
               onRefresh={(taskId) => void refreshTask(taskId)}
             />
+            <section className="seedance-final-video">
+              <div>
+                <h5>导出与下载</h5>
+                <p>保留四种可审查、可下载的文件：原参考视频、生成画面拼接版、最终合成版，以及原视频和最终合成版同步播放的左右对比预览。合成只使用本地 FFmpeg，不会调用视频模型或计费。</p>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={!allSegmentsCompleted || submitting}
+                onClick={() => void composeFinalVideo()}
+              >
+                {submitting ? "正在生成导出文件" : completedVideos.some((video) => video.kind === "comparison") ? "重新生成导出文件" : "生成四个导出文件"}
+              </Button>
+              {!allSegmentsCompleted ? <small>请先等待所有连续片段都显示“已完成”。</small> : null}
+              {completedVideos.length ? (
+                <div className="seedance-video-exports">
+                  {completedVideos.map((video) => (
+                    <article key={video.kind} className={`seedance-video-export${video.kind === "comparison" ? " seedance-video-export--comparison" : ""}`}>
+                      <div>
+                        <b>{video.label}</b>
+                        <p>{video.description}</p>
+                      </div>
+                      <video controls preload="metadata" src={`${sourceAssetBaseUrl}/${video.asset_path}`}>
+                        当前浏览器无法播放该视频。
+                      </video>
+                      <a href={`${sourceAssetBaseUrl}/${video.asset_path}`} download>
+                        下载{video.label}
+                      </a>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </section>
           </section>
-      </div>
+          <div className="replacement-wizard__footer">
+            <Button variant="secondary" onClick={() => onStepChange(3)}>上一步</Button>
+            <span>{workspaceSaving ? "正在保存当前设置…" : workspaceMessage || "当前设置会自动保存"}</span>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

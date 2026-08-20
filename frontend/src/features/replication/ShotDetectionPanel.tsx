@@ -1,5 +1,5 @@
 import { Boxes, Clapperboard, LoaderCircle } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../../components/ui/Button";
 import { getSavedShotAnalysisState } from "../../api/shotDetection";
@@ -9,6 +9,10 @@ import { useStoryboardScript } from "../../hooks/useStoryboardScript";
 import type { InspectorData } from "../../types/douyin";
 import { AutoShotList } from "./AutoShotList";
 import { ReplicaPlaybookPanel } from "./ReplicaPlaybookPanel";
+import {
+  ReplacementWorkflowTabs,
+  type ReplacementWorkflowStep,
+} from "./ReplacementWorkflowTabs";
 
 interface ShotDetectionPanelProps {
   data: InspectorData;
@@ -24,8 +28,11 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
   const playbook = useReplicaPlaybook();
   const storyboardScript = useStoryboardScript();
   const mediaUrl = data.video?.proxy_url ?? "";
+  const localAnalysisId = data.video?.local_analysis_id;
   const result = detector.result;
   const storageKey = savedAnalysisStorageKey(data.aweme_id);
+  const [activeStep, setActiveStep] = useState<ReplacementWorkflowStep>(1);
+  const [availableStep, setAvailableStep] = useState<ReplacementWorkflowStep>(1);
 
   useEffect(() => {
     detector.reset();
@@ -41,6 +48,10 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
         detector.restore(savedState.detection);
         storyboardScript.restore(savedState.storyboard_script);
         playbook.restore(savedState.replica_playbook);
+        if (savedState.replica_playbook) {
+          setAvailableStep(2);
+          setActiveStep(2);
+        }
       })
       .catch(() => window.localStorage.removeItem(storageKey));
     return () => {
@@ -58,8 +69,16 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
   const startDetection = async () => {
     playbook.reset();
     storyboardScript.reset();
-    const nextResult = await detector.detect(data.aweme_id, mediaUrl);
-    if (nextResult) window.localStorage.setItem(storageKey, nextResult.analysis_id);
+    const nextResult = await detector.detect(
+      data.aweme_id,
+      mediaUrl,
+      localAnalysisId,
+    );
+    if (nextResult) {
+      window.localStorage.setItem(storageKey, nextResult.analysis_id);
+      setAvailableStep(1);
+      setActiveStep(1);
+    }
   };
 
   const startProductAnalysis = async () => {
@@ -67,7 +86,11 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
     const script = storyboardScript.result
       ?? await storyboardScript.build(result.analysis_id, data.description || data.caption || "");
     if (!script) return;
-    await playbook.build(result.analysis_id);
+    const nextPlaybook = await playbook.build(result.analysis_id);
+    if (nextPlaybook) {
+      setAvailableStep(2);
+      setActiveStep(2);
+    }
   };
 
   const analyzingProducts = storyboardScript.loading || playbook.loading;
@@ -94,38 +117,47 @@ export function ShotDetectionPanel({ data, onSeek }: ShotDetectionPanelProps) {
       {detector.loading ? <p className="shot-detection__message">正在提取视频并识别镜头，请稍候。</p> : null}
 
       {result ? (
-        <div className="local-replacement-flow">
-          <section className="local-replacement-flow__step">
-            <div className="local-replacement-flow__step-heading">
-              <div>
-                <span>1</span>
-                <div><h4>确认镜头范围</h4><p>已识别的镜头可点击定位回参考视频。</p></div>
+        <div className="replacement-wizard">
+          <ReplacementWorkflowTabs
+            activeStep={activeStep}
+            availableStep={availableStep}
+            onSelect={setActiveStep}
+          />
+          {activeStep === 1 ? (
+            <section className="replacement-wizard__stage">
+              <div className="replacement-wizard__stage-copy">
+                <h4>确认参考视频分析</h4>
+                <p>已识别 {result.shots.length} 个镜头。下一步会把相邻镜头合成不超过 15 秒的连续片段，并找出可替换的商品。</p>
               </div>
-            </div>
-            <AutoShotList result={result} onSeek={onSeek} />
-          </section>
-
-          <section className="local-replacement-flow__step">
-            <div className="local-replacement-flow__step-heading">
-              <div>
-                <span>2</span>
-                <div><h4>识别可替换商品</h4><p>系统会在后台理解镜头与商品，不要求你查看分镜脚本。</p></div>
+              <div className="replacement-wizard__summary">
+                <b>参考视频已保存到本地</b>
+                <span>
+                  {result.duration_seconds.toFixed(1)} 秒 · {result.shots.length} 个镜头 · CDN 失效不影响后续操作
+                </span>
               </div>
-              <Button
-                variant="secondary"
-                disabled={analyzingProducts}
-                onClick={() => void startProductAnalysis()}
-                icon={analyzingProducts ? <LoaderCircle className="spin" /> : <Boxes />}
-              >
-                {analyzingProducts ? "正在识别商品" : playbook.result ? "重新识别商品" : "识别可替换商品"}
-              </Button>
-            </div>
-            {analyzingProducts ? <p className="shot-detection__message">{storyboardScript.progressMessage || "正在理解镜头中的商品和交互关系。"}</p> : null}
-            {analysisError ? <p className="shot-detection__message shot-detection__message--error" role="alert">{analysisError}</p> : null}
-          </section>
-
-          {playbook.result ? (
+              <div className="replacement-wizard__footer">
+                <details className="replacement-wizard__details">
+                  <summary>查看镜头明细并定位参考视频</summary>
+                  <AutoShotList result={result} onSeek={onSeek} />
+                </details>
+                <Button
+                  variant="primary"
+                  disabled={analyzingProducts}
+                  onClick={() => void startProductAnalysis()}
+                  icon={analyzingProducts ? <LoaderCircle className="spin" /> : <Boxes />}
+                >
+                  {analyzingProducts ? "正在分析商品" : playbook.result ? "重新分析商品" : "继续：分析商品"}
+                </Button>
+              </div>
+              {analyzingProducts ? <p className="shot-detection__message">{storyboardScript.progressMessage || "正在理解镜头中的商品和交互关系。"}</p> : null}
+              {analysisError ? <p className="shot-detection__message shot-detection__message--error" role="alert">{analysisError}</p> : null}
+            </section>
+          ) : null}
+          {playbook.result && activeStep > 1 ? (
             <ReplicaPlaybookPanel
+              activeStep={activeStep}
+              onStepChange={setActiveStep}
+              onUnlockStep={setAvailableStep}
               result={playbook.result}
               storyboardScript={storyboardScript.result}
               sourceAssetBaseUrl={result.asset_base_url}

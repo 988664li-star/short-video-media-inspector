@@ -100,14 +100,6 @@ class Settings:
     seedream_model: str = os.environ.get(
         "SEEDREAM_MODEL", "doubao-seedream-5-0-260128"
     )
-    # GPT Image 2 settings are read when the backend process starts. Keep this
-    # opt-in single-shot anchor edit provider independent from Ark credentials.
-    gpt_image_api_key: str = os.environ.get("GPT_IMAGE_API_KEY", "")
-    gpt_image_edits_url: str = os.environ.get(
-        "GPT_IMAGE_EDITS_URL",
-        "https://dm-fox.rjj.cc/codex/v1/images/edits",
-    )
-    gpt_image_model: str = os.environ.get("GPT_IMAGE_MODEL", "gpt-image-2")
     ark_files_api_url: str = os.environ.get(
         "VOLCENGINE_ARK_FILES_API_URL",
         "https://ark.cn-beijing.volces.com/api/v3/files",

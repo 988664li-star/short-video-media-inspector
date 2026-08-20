@@ -242,6 +242,10 @@ class StoryboardChunkService:
         return [output_path.relative_to(job_path).as_posix()]
 
     def _extract_frame(self, source_path: Path, output_path: Path, seconds: float) -> None:
+        if not source_path.is_file():
+            raise ReplicaAnalysisNotReadyError("本地参考视频不存在，请重新解析并提取视频")
+        output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        seconds = self._safe_frame_seconds(source_path, seconds)
         command = [
             self.config.ffmpeg_binary,
             "-y",
@@ -262,15 +266,49 @@ class StoryboardChunkService:
             subprocess.run(command, check=True, capture_output=True, text=True)
         except (FileNotFoundError, subprocess.CalledProcessError) as exc:
             raise ReplicaAnalysisNotReadyError("无法为强制切分的镜头导出关键帧") from exc
+        if not output_path.is_file() or output_path.stat().st_size <= 0:
+            raise ReplicaAnalysisNotReadyError("无法从本地参考视频补回分镜关键帧")
 
-    @staticmethod
+    def _safe_frame_seconds(self, source_path: Path, requested_seconds: float) -> float:
+        """Keep extraction inside the actual decodable range of a local video."""
+        probe_binary = (
+            str(Path(self.config.ffmpeg_binary).with_name("ffprobe"))
+            if "/" in self.config.ffmpeg_binary
+            else "ffprobe"
+        )
+        try:
+            result = subprocess.run(
+                [
+                    probe_binary,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(source_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            duration = float(result.stdout.strip())
+        except (FileNotFoundError, subprocess.CalledProcessError, ValueError) as exc:
+            raise ReplicaAnalysisNotReadyError("无法读取本地参考视频时长") from exc
+        if duration <= 0:
+            raise ReplicaAnalysisNotReadyError("本地参考视频时长无效")
+        # 有些封装格式在声明时长前约 0.5 秒已没有可抽取的关键帧；比起失败，
+        # 回退到可稳定解码的尾帧更适合补回派生的拼图素材。
+        return min(max(0.0, requested_seconds), max(0.0, duration - 0.5))
+
     def _render_contact_sheet(
-        job_path: Path, output_path: Path, shots: list[dict[str, Any]]
+        self, job_path: Path, output_path: Path, shots: list[dict[str, Any]]
     ) -> None:
         try:
             from PIL import Image, ImageDraw, ImageOps
         except ImportError as exc:
             raise ReplicaAnalysisNotReadyError("缺少 Pillow，无法生成拼接分镜图") from exc
+        output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         frames = [
             (shot, frame_index, frame_path)
             for shot in shots
@@ -295,7 +333,13 @@ class StoryboardChunkService:
             except ValueError as exc:
                 raise ReplicaAnalysisNotReadyError("分镜关键帧路径无效") from exc
             if not frame_path.is_file():
-                raise ReplicaAnalysisNotReadyError("分镜关键帧不存在，请重新执行自动分镜")
+                # 关键帧是由本地 source.mp4 派生的缓存素材。缺失时自动补回，
+                # 不再要求用户重新获取可能已失效的 CDN 视频。
+                self._extract_frame(
+                    job_path / "source.mp4",
+                    frame_path,
+                    (int(shot["start_ms"]) + int(shot["end_ms"])) / 2000,
+                )
             with Image.open(frame_path) as raw_image:
                 image = ImageOps.contain(raw_image.convert("RGB"), (image_width, image_height))
             row, column = divmod(index, columns)

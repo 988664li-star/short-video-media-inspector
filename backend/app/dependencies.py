@@ -49,9 +49,6 @@ seedance_workspace_service = SeedanceWorkspaceService(
     settings.shot_detection_ffmpeg_binary,
     settings.seedream_api_url,
     settings.seedream_model,
-    settings.gpt_image_api_key,
-    settings.gpt_image_edits_url,
-    settings.gpt_image_model,
 )
 replica_project_service = ReplicaProjectService(settings.replica_projects_db_path)
 

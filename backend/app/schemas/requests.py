@@ -30,6 +30,10 @@ class ShotDetectionRequest(StrictRequest):
         max_length=256,
         pattern=r"^/api/media/[a-f0-9]{32}/\d+$",
     )
+    local_analysis_id: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{64}$",
+    )
 
 
 class StoryboardScriptRequest(StrictRequest):
@@ -64,7 +68,7 @@ class SeedanceWorkspaceRequest(StrictRequest):
         "doubao-seedance-2-0-260128",
         "doubao-seedance-2-0-fast-260128",
     ] = "doubao-seedance-2-0-mini-260615"
-    prompt: str = Field(default="", max_length=12_000)
+    extra_instruction: str = Field(default="", max_length=2_000)
     bindings: list[SeedanceReplacementBindingRequest] = Field(default_factory=list, max_length=12)
 
 

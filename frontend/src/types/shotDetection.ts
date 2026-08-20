@@ -76,7 +76,7 @@ export interface SeedanceReplacementBinding {
 interface SeedanceWorkspace {
   analysis_id: string;
   model: SeedanceModelId;
-  prompt: string;
+  extra_instruction: string;
   bindings: SeedanceReplacementBinding[];
   version: number;
   updated_at: number;
@@ -127,7 +127,16 @@ export interface SeedanceWorkspaceResult {
   tasks: SeedanceTask[];
   ark_events: ArkApiEvent[];
   anchors: SeedanceVisualAnchor[];
-  shot_anchors: SeedanceShotVisualAnchor[];
+  completed_videos: SeedanceCompletedVideo[];
+}
+
+export interface SeedanceCompletedVideo {
+  kind: "original" | "generated" | "combined" | "comparison";
+  label: string;
+  description: string;
+  asset_path: string;
+  bytes: number;
+  updated_at: number;
 }
 
 export interface SeedanceVisualAnchor {
@@ -135,18 +144,11 @@ export interface SeedanceVisualAnchor {
   model: string;
   prompt: string;
   status: string;
+  is_current: boolean;
   anchor_file_id: string;
   response: Record<string, unknown>;
   error_message: string;
   updated_at: number;
-}
-
-interface SeedanceShotVisualAnchor extends SeedanceVisualAnchor {
-  shot_order: number;
-  scene_id: number;
-  start_ms: number;
-  end_ms: number;
-  source_frame_path: string;
 }
 
 interface SeedanceAnchorImagePreviewInput {
@@ -172,6 +174,27 @@ export interface SeedanceAnchorImagePreview {
 
 export interface SeedanceAnchorImagePreviewResult {
   previews: SeedanceAnchorImagePreview[];
+}
+
+export interface SeedanceGenerationReviewProduct {
+  candidate_id: string;
+  target_description: string;
+  assets: ArkFile[];
+}
+
+export interface SeedanceGenerationReviewSegment {
+  segment_id: number;
+  start_ms: number;
+  end_ms: number;
+  prompt: string;
+  source_video: ArkFile;
+  anchor_image: ArkFile;
+  source_keyframe_image: ArkFile;
+  product_references: SeedanceGenerationReviewProduct[];
+}
+
+export interface SeedanceGenerationReviewResult {
+  segments: SeedanceGenerationReviewSegment[];
 }
 
 interface StoryboardScriptShot {

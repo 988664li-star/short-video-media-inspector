@@ -3,6 +3,7 @@ import { LoaderCircle, RefreshCw, Send } from "lucide-react";
 import { publicErrorMessage } from "../../api/client";
 import { Button } from "../../components/ui/Button";
 import type {
+  SeedanceAnchorImagePreview,
   SeedanceTask,
   StoryboardScriptResult,
 } from "../../types/shotDetection";
@@ -22,11 +23,15 @@ function taskStatusLabel(status: string) {
   return TASK_STATUS_LABELS[status] ?? "状态更新中";
 }
 
-function getOutputUrl(task: SeedanceTask) {
-  const output = task.response.output;
-  if (!output || typeof output !== "object") return "";
-  const videoUrl = (output as Record<string, unknown>).video_url;
+function videoUrlFrom(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const videoUrl = (value as Record<string, unknown>).video_url;
   return typeof videoUrl === "string" ? videoUrl : "";
+}
+
+function getOutputUrl(task: SeedanceTask) {
+  // 方舟任务完成时把成片放在 content.video_url。
+  return videoUrlFrom(task.response.content);
 }
 
 interface SeedanceTaskListProps {
@@ -49,7 +54,7 @@ export function SeedanceTaskList({ tasks, refreshingTaskId, onRefresh }: Seedanc
               <b>{taskStatusLabel(task.status)}</b>
               {task.segment_id ? (
                 <em>
-                  分段 {String(task.segment_id).padStart(2, "0")}
+                  连续片段 {String(task.segment_id).padStart(2, "0")}
                   {task.segment_start_ms !== null && task.segment_end_ms !== null
                     ? ` · ${formatShotTimestamp(task.segment_start_ms / 1000)}–${formatShotTimestamp(task.segment_end_ms / 1000)}`
                     : ""}
@@ -57,7 +62,14 @@ export function SeedanceTaskList({ tasks, refreshingTaskId, onRefresh }: Seedanc
               ) : null}
               <span>{new Date(task.created_at * 1000).toLocaleString()}</span>
             </div>
-            {outputUrl ? <a href={outputUrl} target="_blank" rel="noreferrer">打开结果视频</a> : null}
+            {outputUrl ? (
+              <section className="seedance-task-result" aria-label="生成结果">
+                <video controls preload="metadata" src={outputUrl}>
+                  当前浏览器无法播放该结果视频。
+                </video>
+                <a href={outputUrl} target="_blank" rel="noreferrer">在新窗口打开结果视频</a>
+              </section>
+            ) : null}
             {task.error_message ? <p>{publicErrorMessage(task.error_message, "生成失败，请稍后重试。")}</p> : null}
             <Button
               variant="text"
@@ -77,28 +89,38 @@ export function SeedanceTaskList({ tasks, refreshingTaskId, onRefresh }: Seedanc
 interface SegmentSubmitListProps {
   segments: StoryboardScriptResult["segments"];
   tasks: SeedanceTask[];
+  anchorPreviews: SeedanceAnchorImagePreview[];
   confirmed: boolean;
   submittingSegmentId: number | null;
   disabled: boolean;
   onSubmit: (segmentId: number) => void;
 }
 
-export function SegmentSubmitList({ segments, tasks, confirmed, submittingSegmentId, disabled, onSubmit }: SegmentSubmitListProps) {
+export function SegmentSubmitList({ segments, tasks, anchorPreviews, confirmed, submittingSegmentId, disabled, onSubmit }: SegmentSubmitListProps) {
   return (
     <ul className="seedance-segment-submit-list">
       {segments.map((segment) => {
         const latestTask = tasks.find((task) => task.segment_id === segment.segment_id);
+        const anchorPreview = anchorPreviews.find((item) => item.segment_id === segment.segment_id);
         const submitting = submittingSegmentId === segment.segment_id;
         return (
           <li key={segment.segment_id}>
             <div>
-              <b>分段 {String(segment.segment_id).padStart(2, "0")}</b>
+              <b>连续片段 {String(segment.segment_id).padStart(2, "0")}</b>
               <span>{formatShotTimestamp(segment.start_ms / 1000)}–{formatShotTimestamp(segment.end_ms / 1000)}</span>
               <small>{latestTask ? `最近任务：${taskStatusLabel(latestTask.status)}` : "尚未提交"}</small>
             </div>
             <Button variant="primary" disabled={disabled || !confirmed || submitting} onClick={() => onSubmit(segment.segment_id)} icon={submitting ? <LoaderCircle className="spin" /> : <Send />}>
-              {submitting ? "正在提交" : `提交分段 ${String(segment.segment_id).padStart(2, "0")}`}
+              {submitting ? "正在提交" : `生成连续片段 ${String(segment.segment_id).padStart(2, "0")}`}
             </Button>
+            <details className="seedance-segment-submit-list__prompt">
+              <summary>查看本片段的关键帧拼图提示词</summary>
+              {anchorPreview?.prompt ? (
+                <pre>{anchorPreview.prompt}</pre>
+              ) : (
+                <p>请先点击上方“加载片段拼图提示词”。此操作只读取提示词，不会调用图片或视频模型。</p>
+              )}
+            </details>
           </li>
         );
       })}
