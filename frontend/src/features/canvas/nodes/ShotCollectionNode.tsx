@@ -1,5 +1,6 @@
 import { CheckCircle2, Clapperboard, Expand, LoaderCircle, RotateCw, TriangleAlert } from "lucide-react";
 import type { NodeProps } from "@xyflow/react";
+import { useEffect } from "react";
 
 import { useCanvasNodeActions } from "./CanvasNodeActions";
 import { CanvasNodeShell } from "./CanvasNodeShell";
@@ -19,7 +20,7 @@ function statusIcon(status: string) {
 }
 
 export function ShotCollectionNode({ id, data, selected, dragging }: NodeProps<CanvasFlowNode>) {
-  const { previewMedia } = useCanvasNodeActions();
+  const { previewMedia, refreshReplacementOutputGroup } = useCanvasNodeActions();
   const { node } = data;
   const shots = node.shot_assets ?? [];
   const replacementShots = shots.filter((shot) => (shot.replacement_versions ?? []).length > 0).slice(-PREVIEW_LIMIT);
@@ -28,15 +29,23 @@ export function ShotCollectionNode({ id, data, selected, dragging }: NodeProps<C
   const latestVersions = shots.flatMap((shot) => (shot.replacement_versions ?? []).slice(-1));
   const activeCount = latestVersions.filter((version) => version.status === "queued" || version.status === "running").length;
   const completedCount = latestVersions.filter((version) => version.status === "succeeded").length;
+  const isGenerationGroup = node.derived_kind === "shot";
+  const shouldAutoRefresh = latestVersions.some((version) => version.status === "queued" || version.status === "running");
+
+  useEffect(() => {
+    if (!shouldAutoRefresh) return;
+    const timer = window.setTimeout(() => void refreshReplacementOutputGroup(id), 5000);
+    return () => window.clearTimeout(timer);
+  }, [id, refreshReplacementOutputGroup, shouldAutoRefresh]);
 
   return (
     <>
       <ShotCollectionCapabilities id={id} node={node} selected={selected && !dragging} />
-      <CanvasNodeShell node={node} selected={selected} label="分镜组" icon={<Clapperboard />}>
+      <CanvasNodeShell node={node} selected={selected} label={isGenerationGroup ? "编辑片段组" : "替换结果组"} icon={<Clapperboard />}>
       <section className="canvas-shot-collection">
         <header className="canvas-shot-collection__summary">
-          <strong>共 {shots.length} 个镜头</strong>
-          <span>{activeCount ? `${activeCount} 个自动刷新中 · ${completedCount} 个已完成` : completedCount ? `${completedCount} 个替换版已完成` : `仅展示 ${Math.min(previews.length, PREVIEW_LIMIT)} 个`}</span>
+          <strong>共 {shots.length} 个{isGenerationGroup ? "编辑片段" : "镜头"}</strong>
+          <span>{activeCount ? `${activeCount} 个生成中 · ${completedCount} 个已完成` : completedCount ? `${completedCount} 个替换版已完成` : `仅展示 ${Math.min(previews.length, PREVIEW_LIMIT)} 个`}</span>
         </header>
         {previews.length ? (
           <div className="canvas-shot-collection__grid">
@@ -45,11 +54,11 @@ export function ShotCollectionNode({ id, data, selected, dragging }: NodeProps<C
                 <button
                   className="canvas-shot-collection__shot"
                   type="button"
-                  title={`预览原镜头 ${String(shot.index).padStart(2, "0")}`}
+                  title={`预览原始编辑片段 ${String(shot.index).padStart(2, "0")}`}
                   onClick={() => previewMedia({
                     ...node,
                     kind: "video",
-                    title: `原镜头 ${String(shot.index).padStart(2, "0")}`,
+                    title: `原始编辑片段 ${String(shot.index).padStart(2, "0")}`,
                     detail: `${shot.start_seconds.toFixed(2)}–${shot.end_seconds.toFixed(2)} 秒`,
                     asset_id: shot.asset_id,
                     asset_url: shot.asset_url,
@@ -57,7 +66,7 @@ export function ShotCollectionNode({ id, data, selected, dragging }: NodeProps<C
                   })}
                 >
                   <video src={shot.asset_url} muted playsInline preload="metadata" />
-                  <span>镜头 {String(shot.index).padStart(2, "0")}</span>
+                  <span>{isGenerationGroup ? "片段" : "镜头"} {String(shot.index).padStart(2, "0")}</span>
                   <Expand aria-hidden="true" />
                 </button>
                 {(shot.replacement_versions ?? []).slice(-1).map((version) => version.status === "succeeded" && version.result_asset_url ? (
@@ -79,7 +88,11 @@ export function ShotCollectionNode({ id, data, selected, dragging }: NodeProps<C
             ))}
           </div>
         ) : <p className="canvas-shot-collection__empty">暂无可展示的镜头片段</p>}
-        <p className="canvas-shot-collection__note">提交后会自动回写并每 5 秒刷新一次；有替换任务的镜头会优先展示，替换版可直接预览。</p>
+        <p className="canvas-shot-collection__note">
+          {isGenerationGroup
+            ? "按整秒连续切分，每段 4–8 秒；场景切点不影响主体替换任务边界。"
+            : "生成结果会自动更新到对应镜头卡片；有替换任务的镜头会优先展示，替换版可直接预览。"}
+        </p>
       </section>
       </CanvasNodeShell>
     </>

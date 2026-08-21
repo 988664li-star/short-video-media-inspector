@@ -28,10 +28,10 @@ export function VideoNodeCapabilities({ id, node, selected }: VideoNodeCapabilit
       <button
         type="button"
         disabled={!ready || busy}
-        title={ready ? "识别镜头边界，并生成按镜头切出的片段节点" : "请先上传或生成视频"}
+        title={ready ? "按整秒创建 4–8 秒连续编辑片段；场景切点不会拆开同一次主体替换任务" : "请先上传或生成视频"}
         onClick={() => void splitVideoByShots(id)}
       >
-        {splitting ? <LoaderCircle className="spin" /> : <Scissors />} 按镜头分段
+        {splitting ? <LoaderCircle className="spin" /> : <Scissors />} 创建编辑片段
       </button>
       <button
         type="button"

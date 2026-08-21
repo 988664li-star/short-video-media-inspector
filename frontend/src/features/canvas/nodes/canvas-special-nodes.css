@@ -53,6 +53,12 @@
 .canvas-replaceable-analysis__shot-list button { display: inline-flex; align-items: center; gap: .25rem; min-height: 1.7rem; padding: 0 .4rem; border: 1px solid #334b63; border-radius: .35rem; background: #142236; color: #bcd0e4; font: 500 var(--text-2xs) var(--font-sans); cursor: pointer; }
 .canvas-replaceable-analysis__shot-list button:hover { border-color: #ff7b86; color: #fff; }
 .canvas-replaceable-analysis__shot-list button svg { width: .74rem; height: .74rem; color: #ff8b95; }
+.canvas-replaceable-analysis__storyboards { border-top: 1px solid #243649; border-bottom: 1px solid #243649; padding: .45rem 0; }
+.canvas-replaceable-analysis__storyboards summary { color: #9bb4ca; cursor: pointer; font: 600 var(--text-2xs) var(--font-sans); }
+.canvas-replaceable-analysis__storyboards > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin-top: .5rem; }
+.canvas-replaceable-analysis__storyboards button { min-width: 0; padding: .22rem; border: 1px solid #314961; border-radius: .35rem; background: #101d2d; color: #b9cce0; cursor: pointer; font: 600 var(--text-2xs) var(--font-sans); }
+.canvas-replaceable-analysis__storyboards button:hover { border-color: #ff7b86; color: #fff; }
+.canvas-replaceable-analysis__storyboards img { display: block; width: 100%; aspect-ratio: 1; margin-bottom: .18rem; border-radius: .2rem; object-fit: cover; }
 .canvas-replacement-task { display: grid; gap: .72rem; padding: .85rem; background: #0d1622; }
 .canvas-replacement-task__summary { display: flex; align-items: end; justify-content: space-between; gap: .8rem; }
 .canvas-replacement-task__summary div { display: grid; gap: .15rem; }

@@ -20,6 +20,8 @@ class SceneAssetExporter:
         source_path: Path,
         job_path: Path,
         shots: list[dict[str, Any]],
+        *,
+        extract_keyframes: bool = True,
     ) -> None:
         source_duration = self._source_duration(source_path)
         for shot in shots:
@@ -33,18 +35,19 @@ class SceneAssetExporter:
                 float(shot["duration_seconds"]),
             )
             shot["clip"] = clip_path.relative_to(job_path).as_posix()
-            frame_data = self._select_keyframes(
-                source_path,
-                scene_dir,
-                float(shot["start_seconds"]),
-                float(shot["duration_seconds"]),
-                source_duration,
-            )
-            scene_prefix = scene_dir.relative_to(job_path).as_posix()
-            for key in ("candidate_frame_data", "selected_frames"):
-                for frame in frame_data[key]:
-                    frame["path"] = f"{scene_prefix}/{frame['path']}"
-            shot.update(frame_data)
+            if extract_keyframes:
+                frame_data = self._select_keyframes(
+                    source_path,
+                    scene_dir,
+                    float(shot["start_seconds"]),
+                    float(shot["duration_seconds"]),
+                    source_duration,
+                )
+                scene_prefix = scene_dir.relative_to(job_path).as_posix()
+                for key in ("candidate_frame_data", "selected_frames"):
+                    for frame in frame_data[key]:
+                        frame["path"] = f"{scene_prefix}/{frame['path']}"
+                shot.update(frame_data)
 
     def _export_scene_clip(
         self,

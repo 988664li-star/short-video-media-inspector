@@ -100,7 +100,6 @@ canvas_replacement_task_service = CanvasReplacementTaskService(
         api_key=settings.seedance_api_key,
         api_url=settings.seedance_api_url,
         max_asset_bytes=settings.canvas_asset_max_bytes,
-        ffmpeg_binary=settings.shot_detection_ffmpeg_binary,
     ),
 )
 

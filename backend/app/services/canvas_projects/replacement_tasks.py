@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-import os
+import math
 from pathlib import Path
-import tempfile
 from typing import Any
 
 import av
@@ -14,6 +13,7 @@ import httpx
 
 from backend.app.services.seedance.object_storage import ObjectStorageError, SeedanceObjectStorage
 
+from .generation import MAX_SEEDANCE_VIDEO_SECONDS, MIN_SEEDANCE_VIDEO_SECONDS
 from .prompts import CanvasPromptTemplateError, CanvasPromptTemplates
 from .service import CanvasAssetNotFoundError, CanvasProjectService
 
@@ -23,8 +23,7 @@ SEEDANCE_MODELS = {
     "doubao-seedance-2-0-260128",
     "doubao-seedance-2-0-fast-260128",
 }
-MIN_GENERATION_SECONDS = 4
-MAX_GENERATION_SECONDS = 15
+MAX_CONCURRENT_SUBMISSIONS = 3
 
 
 class CanvasReplacementTaskError(RuntimeError):
@@ -36,15 +35,14 @@ class CanvasReplacementVideoConfig:
     api_key: str
     api_url: str
     max_asset_bytes: int
-    ffmpeg_binary: str
 
 
 class CanvasReplacementTaskService:
     """Render, submit and refresh explicit per-shot video replacement tasks.
 
     This service is intentionally independent from the older continuous-segment
-    Seedance workspace. A canvas task always has one source shot video and one
-    or more target reference images.
+    Seedance workspace. A canvas task always has one contiguous source video
+    edit segment and one or more target reference images.
     """
 
     def __init__(
@@ -86,7 +84,7 @@ class CanvasReplacementTaskService:
             shot_index = int(shot["index"])
             action = action_by_shot.get(
                 shot_index,
-                f"{source_object_name} 出现在当前镜头中，保持原有位置、动作与遮挡关系。",
+                f"{source_object_name} 出现在当前连续片段中，保持原有位置、动作与遮挡关系。",
             )
             prompts.append({
                 "shot_index": shot_index,
@@ -97,6 +95,7 @@ class CanvasReplacementTaskService:
                     target_image_references=image_references,
                     shot_action=action,
                 ),
+                "input_revision": 3,
                 "status": "ready",
             })
         return prompts
@@ -123,26 +122,33 @@ class CanvasReplacementTaskService:
         }
         if any(int(shot["index"]) not in prompt_by_shot for shot in shots):
             raise CanvasReplacementTaskError("所选镜头缺少已审核的替换提示词")
+        if any(int(item.get("input_revision") or 0) != 3 for item in prompts):
+            raise CanvasReplacementTaskError("视频编辑指令使用的是旧结构，请重新生成视频编辑指令后再提交")
 
         target_urls = await asyncio.gather(*[
             self._upload_asset(project_id, asset_id, expected_prefix="image/")
             for asset_id in dict.fromkeys(target_asset_ids)
         ])
-        results: list[dict[str, Any]] = []
-        for shot in sorted(shots, key=lambda item: int(item["index"])):
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_SUBMISSIONS)
+
+        async def submit_shot(shot: dict[str, Any]) -> dict[str, Any]:
             shot_index = int(shot["index"])
-            try:
-                result = await self._submit_one(
-                    project_id,
-                    model=model,
-                    shot=shot,
-                    prompt=prompt_by_shot[shot_index],
-                    target_urls=target_urls,
-                )
-            except CanvasReplacementTaskError as exc:
-                result = self._result_payload(shot, status="failed", error=str(exc))
-            results.append(result)
-        return results
+            async with semaphore:
+                try:
+                    return await self._submit_one(
+                        project_id,
+                        model=model,
+                        shot=shot,
+                        prompt=prompt_by_shot[shot_index],
+                        target_urls=target_urls,
+                    )
+                except CanvasReplacementTaskError as exc:
+                    return self._result_payload(shot, status="failed", error=str(exc))
+
+        return await asyncio.gather(*[
+            submit_shot(shot)
+            for shot in sorted(shots, key=lambda item: int(item["index"]))
+        ])
 
     async def refresh(
         self,
@@ -206,14 +212,7 @@ class CanvasReplacementTaskService:
         source_url, duration, ratio = await self._upload_shot_video(project_id, shot)
         request_payload = {
             "model": model,
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "video_url", "role": "reference_video", "video_url": {"url": source_url}},
-                *[
-                    {"type": "image_url", "role": "reference_image", "image_url": {"url": url}}
-                    for url in target_urls
-                ],
-            ],
+            "content": self._request_content(prompt, source_url, target_urls),
             "generate_audio": False,
             "watermark": False,
             "duration": duration,
@@ -259,50 +258,16 @@ class CanvasReplacementTaskService:
         if not str(asset.get("mime_type") or "").startswith("video/"):
             raise CanvasReplacementTaskError(f"镜头 {int(shot['index']):02d} 不是视频素材")
         source_duration = float(shot["duration_seconds"])
-        if source_duration > MAX_GENERATION_SECONDS:
+        if not MIN_SEEDANCE_VIDEO_SECONDS <= source_duration <= MAX_SEEDANCE_VIDEO_SECONDS:
             raise CanvasReplacementTaskError(
-                f"镜头 {int(shot['index']):02d} 长于 {MAX_GENERATION_SECONDS} 秒，请重新切分后再生成"
+                f"镜头 {int(shot['index']):02d} 时长为 {source_duration:.2f} 秒，不在 Seedance "
+                f"{MIN_SEEDANCE_VIDEO_SECONDS:.0f}–{MAX_SEEDANCE_VIDEO_SECONDS:.0f} 秒范围内；请在原视频节点重新按镜头分段"
             )
-        prepared_path = await asyncio.to_thread(
-            self._prepare_generation_source,
-            source_path,
-            source_duration,
-        )
-        try:
-            source_url = await self._upload_path(
-                project_id,
-                prepared_path,
-                "video/mp4",
-            )
-        finally:
-            if prepared_path != source_path:
-                prepared_path.unlink(missing_ok=True)
-        return source_url, max(MIN_GENERATION_SECONDS, round(source_duration)), self._video_ratio(source_path)
-
-    def _prepare_generation_source(self, source_path: Path, duration: float) -> Path:
-        if duration >= MIN_GENERATION_SECONDS:
-            return source_path
-        descriptor, output_name = tempfile.mkstemp(
-            prefix="canvas-shot-pad-", suffix=".mp4"
-        )
-        os.close(descriptor)
-        output = Path(output_name)
-        padding = max(0.1, MIN_GENERATION_SECONDS - duration)
-        command = [
-            self.config.ffmpeg_binary, "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(source_path), "-vf", f"tpad=stop_mode=clone:stop_duration={padding:.3f}",
-            "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output),
-        ]
-        import subprocess
-        try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
-        except FileNotFoundError as exc:
-            output.unlink(missing_ok=True)
-            raise CanvasReplacementTaskError("未安装 FFmpeg，无法为短镜头准备视频替换输入") from exc
-        except subprocess.CalledProcessError as exc:
-            output.unlink(missing_ok=True)
-            raise CanvasReplacementTaskError(f"短镜头输入准备失败：{exc.stderr.strip() or '未知错误'}") from exc
-        return output
+        source_url = await self._upload_path(project_id, source_path, "video/mp4")
+        # Seedance accepts whole seconds. Round upward, then trim the generated
+        # result back to the source segment during composition instead of padding
+        # the source video with fake frames.
+        return source_url, math.ceil(source_duration), self._video_ratio(source_path)
 
     async def _upload_asset(self, project_id: str, asset_id: str, *, expected_prefix: str) -> str:
         try:
@@ -358,6 +323,24 @@ class CanvasReplacementTaskService:
         if count == 1:
             return "@图片1"
         return f"@图片1 至 @图片{count}"
+
+    @staticmethod
+    def _request_content(
+        prompt: str, source_url: str, target_urls: list[str]
+    ) -> list[dict[str, Any]]:
+        """Keep the multimodal reference order aligned with the prompt template.
+
+        @视频1 is the source edit segment and every image is a target-object
+        reference. The compact input package matches the video-edit workflow.
+        """
+        return [
+            {"type": "text", "text": prompt},
+            {"type": "video_url", "role": "reference_video", "video_url": {"url": source_url}},
+            *[
+                {"type": "image_url", "role": "reference_image", "image_url": {"url": url}}
+                for url in target_urls
+            ],
+        ]
 
     @staticmethod
     def _task_status(body: Any) -> str:

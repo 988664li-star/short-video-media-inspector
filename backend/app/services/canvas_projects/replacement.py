@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from io import BytesIO
+import math
 from pathlib import Path
 from typing import Any
 
@@ -22,11 +23,10 @@ class CanvasReplacementAnalysisError(RuntimeError):
 
 
 class CanvasReplacementAnalysisService:
-    """Extract durable shot anchors, then analyse compact numbered contact sheets once."""
+    """Analyse each contiguous edit segment as a short temporal storyboard."""
 
-    _CONTACT_SHEET_COLUMNS = 3
-    _CONTACT_SHEET_ROWS = 2
-    _CONTACT_SHEET_TILE_SIZE = (320, 568)
+    _STORYBOARD_FRAME_COUNT = 6
+    _STORYBOARD_COLUMNS = 3
 
     def __init__(
         self,
@@ -78,10 +78,10 @@ class CanvasReplacementAnalysisService:
                 ) from exc
             if not str(asset.get("mime_type") or "").startswith("video/"):
                 raise CanvasReplacementAnalysisError(f"镜头 {int(shot['index']):02d} 不是可分析的视频片段")
-            image_bytes = self._representative_frame(source_path)
+            image_bytes = self._segment_storyboard(source_path)
             frame_asset = self.project_service.save_asset(
                 project_id,
-                f"{Path(str(shot['asset_name'])).stem}-analysis-frame.jpg",
+                f"{Path(str(shot['asset_name'])).stem}-analysis-storyboard.jpg",
                 "image/jpeg",
                 image_bytes,
             )
@@ -91,26 +91,61 @@ class CanvasReplacementAnalysisService:
             })
         return extracted
 
-    @staticmethod
-    def _representative_frame(source_path: Path) -> bytes:
+    @classmethod
+    def _segment_storyboard(cls, source_path: Path) -> bytes:
         try:
             with av.open(str(source_path)) as container:
                 stream = container.streams.video[0]
                 duration = float(stream.duration * stream.time_base) if stream.duration else 0.0
-                target_time = duration * 0.5 if duration > 0 else 0.0
-                selected = None
+                targets = [
+                    duration * index / (cls._STORYBOARD_FRAME_COUNT - 1)
+                    for index in range(cls._STORYBOARD_FRAME_COUNT)
+                ]
+                selected: list[Image.Image] = []
+                target_index = 0
+                last_image: Image.Image | None = None
                 for frame in container.decode(stream):
-                    selected = frame
-                    if frame.time is not None and float(frame.time) >= target_time:
-                        break
+                    timestamp = float(frame.time) if frame.time is not None else 0.0
+                    image = frame.to_image().convert("RGB")
+                    last_image = image
+                    while target_index < len(targets) and timestamp >= targets[target_index]:
+                        selected.append(image.copy())
+                        target_index += 1
+                if last_image is not None:
+                    selected.extend(last_image.copy() for _ in range(len(targets) - len(selected)))
         except (av.error.FFmpegError, IndexError, OSError) as exc:
             raise CanvasReplacementAnalysisError(f"无法读取镜头关键帧：{exc}") from exc
-        if selected is None:
+        if not selected:
             raise CanvasReplacementAnalysisError("镜头中没有可用画面")
-        image = selected.to_image().convert("RGB")
-        image.thumbnail((960, 960))
+        first = selected[0]
+        tile_width = 360
+        tile_height = max(200, round(tile_width * first.height / first.width))
+        gutter = 8
+        label_height = 30
+        rows = math.ceil(cls._STORYBOARD_FRAME_COUNT / cls._STORYBOARD_COLUMNS)
+        storyboard = Image.new(
+            "RGB",
+            (
+                cls._STORYBOARD_COLUMNS * tile_width + (cls._STORYBOARD_COLUMNS + 1) * gutter,
+                rows * (tile_height + label_height) + (rows + 1) * gutter,
+            ),
+            "#101722",
+        )
+        draw = ImageDraw.Draw(storyboard)
+        for index, source in enumerate(selected[:cls._STORYBOARD_FRAME_COUNT]):
+            image = source.copy()
+            image.thumbnail((tile_width, tile_height))
+            column = index % cls._STORYBOARD_COLUMNS
+            row = index // cls._STORYBOARD_COLUMNS
+            origin_x = gutter + column * (tile_width + gutter)
+            origin_y = gutter + row * (tile_height + label_height + gutter)
+            storyboard.paste(
+                image,
+                (origin_x + (tile_width - image.width) // 2, origin_y + (tile_height - image.height) // 2),
+            )
+            draw.text((origin_x + 8, origin_y + tile_height + 7), f"帧 {index + 1}", fill="#ffffff")
         buffer = BytesIO()
-        image.save(buffer, format="JPEG", quality=84, optimize=True)
+        storyboard.save(buffer, format="JPEG", quality=88, optimize=True)
         return buffer.getvalue()
 
     def _vision_content(
@@ -119,56 +154,22 @@ class CanvasReplacementAnalysisService:
         keyframes: list[dict[str, Any]],
         instruction: str,
     ) -> list[dict[str, Any]]:
-        contact_sheets = self._contact_sheets(project_id, keyframes)
         content: list[dict[str, Any]] = [{
             "type": "text",
             "text": instruction,
         }]
-        for contact_sheet in contact_sheets:
-            encoded = base64.b64encode(contact_sheet).decode("ascii")
+        for item in sorted(keyframes, key=lambda frame: int(frame["shot_index"])):
+            try:
+                _, path = self.project_service.get_asset_file(project_id, item["asset"]["id"])
+                image_bytes = path.read_bytes()
+            except (CanvasAssetNotFoundError, OSError) as exc:
+                raise CanvasReplacementAnalysisError("编辑片段分镜图读取失败") from exc
+            encoded = base64.b64encode(image_bytes).decode("ascii")
             content.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
             })
         return content
-
-    def _contact_sheets(self, project_id: str, keyframes: list[dict[str, Any]]) -> list[bytes]:
-        capacity = self._CONTACT_SHEET_COLUMNS * self._CONTACT_SHEET_ROWS
-        sheets: list[bytes] = []
-        for offset in range(0, len(keyframes), capacity):
-            batch = keyframes[offset:offset + capacity]
-            tile_width, tile_height = self._CONTACT_SHEET_TILE_SIZE
-            canvas = Image.new(
-                "RGB",
-                (tile_width * self._CONTACT_SHEET_COLUMNS, tile_height * self._CONTACT_SHEET_ROWS),
-                "#0b1420",
-            )
-            draw = ImageDraw.Draw(canvas)
-            for position, item in enumerate(batch):
-                try:
-                    _, path = self.project_service.get_asset_file(project_id, item["asset"]["id"])
-                except CanvasAssetNotFoundError as exc:
-                    raise CanvasReplacementAnalysisError("分析关键帧保存失败") from exc
-                try:
-                    with Image.open(path) as source:
-                        image = source.convert("RGB")
-                except OSError as exc:
-                    raise CanvasReplacementAnalysisError("分析关键帧无法拼接") from exc
-                image.thumbnail((tile_width, tile_height))
-                column = position % self._CONTACT_SHEET_COLUMNS
-                row = position // self._CONTACT_SHEET_COLUMNS
-                origin_x = column * tile_width
-                origin_y = row * tile_height
-                canvas.paste(image, (
-                    origin_x + (tile_width - image.width) // 2,
-                    origin_y + (tile_height - image.height) // 2,
-                ))
-                draw.rectangle((origin_x + 10, origin_y + 10, origin_x + 104, origin_y + 38), fill="#06101b")
-                draw.text((origin_x + 16, origin_y + 16), str(item["shot_index"]), fill="#ffffff")
-            output = BytesIO()
-            canvas.save(output, format="JPEG", quality=82, optimize=True)
-            sheets.append(output.getvalue())
-        return sheets
 
     @staticmethod
     def _normalise_objects(result: dict[str, Any], valid_shots: set[int]) -> list[dict[str, Any]]:
@@ -207,7 +208,7 @@ class CanvasReplacementAnalysisService:
             action_shots = {item["shot_index"] for item in actions}
             actions.extend({
                 "shot_index": shot_index,
-                "description": f"{name} 出现在当前镜头中，保持原有位置、动作与遮挡关系。",
+                "description": f"{name} 出现在当前连续片段中，保持原有位置、动作与遮挡关系。",
             } for shot_index in shot_indices if shot_index not in action_shots)
             objects.append({
                 "id": f"object-{index}",

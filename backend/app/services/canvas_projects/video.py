@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -14,6 +15,7 @@ from backend.app.services.shot_detection.detector import PySceneDetector
 from backend.app.services.shot_detection.errors import ShotDecodeError
 from backend.app.services.shot_detection.exporter import SceneAssetExporter
 
+from .generation import MIN_SEEDANCE_VIDEO_SECONDS, PREFERRED_CANVAS_SEGMENT_SECONDS
 from .service import CanvasAssetNotFoundError, CanvasProjectService
 
 
@@ -63,14 +65,17 @@ class CanvasVideoService:
 
     def _split_by_shots(self, project_id: str, asset_id: str) -> dict[str, Any]:
         source_asset, source_path = self._source_video(project_id, asset_id)
-        payload, directory = self._export(source_path, asset_id)
+        duration_seconds = self._video_duration(source_path)
+        directory = Path(tempfile.mkdtemp(prefix=f"canvas-video-{asset_id[:8]}-"))
         try:
+            generation_shots = self._plan_generation_shots(duration_seconds)
+            self.exporter.export(source_path, directory, generation_shots, extract_keyframes=False)
             shots: list[dict[str, Any]] = []
-            for shot in payload["shots"]:
+            for shot in generation_shots:
                 clip_path = directory / str(shot["clip"])
                 clip_asset = self._save_file(
                     project_id,
-                    f"{Path(source_asset['filename']).stem}-shot-{int(shot['index']):02d}.mp4",
+                    f"{Path(source_asset['filename']).stem}-edit-segment-{int(shot['index']):02d}.mp4",
                     "video/mp4",
                     clip_path,
                 )
@@ -83,11 +88,62 @@ class CanvasVideoService:
                 })
             return {
                 "source_asset_id": asset_id,
-                "duration_seconds": payload["duration_seconds"],
+                "duration_seconds": duration_seconds,
                 "shots": shots,
             }
         finally:
             self._remove_directory(directory)
+
+    @staticmethod
+    def _plan_generation_shots(
+        source_duration: float,
+    ) -> list[dict[str, Any]]:
+        """Create whole-second, contiguous edit spans; scene cuts do not split jobs."""
+        if source_duration < MIN_SEEDANCE_VIDEO_SECONDS:
+            raise CanvasVideoError(
+                f"原视频仅 {source_duration:.2f} 秒，短于 Seedance 最短 {MIN_SEEDANCE_VIDEO_SECONDS:.0f} 秒，不能提交生成"
+            )
+        windows: list[dict[str, Any]] = []
+        start = 0.0
+        index = 1
+        while source_duration - start > PREFERRED_CANVAS_SEGMENT_SECONDS:
+            maximum_end = min(
+                start + PREFERRED_CANVAS_SEGMENT_SECONDS,
+                source_duration - MIN_SEEDANCE_VIDEO_SECONDS,
+            )
+            end = float(math.floor(maximum_end))
+            duration = end - start
+            windows.append({
+                "index": index,
+                "start_seconds": round(start, 3),
+                "end_seconds": round(end, 3),
+                "duration_seconds": round(duration, 3),
+            })
+            start = end
+            index += 1
+        remaining = source_duration - start
+        if remaining < MIN_SEEDANCE_VIDEO_SECONDS - 0.001:
+            raise CanvasVideoError("无法将视频切分为 4–8 秒的连续生成镜头")
+        windows.append({
+            "index": index,
+            "start_seconds": round(start, 3),
+            "end_seconds": round(source_duration, 3),
+            "duration_seconds": round(remaining, 3),
+        })
+        return windows
+
+    @staticmethod
+    def _video_duration(source_path: Path) -> float:
+        try:
+            with av.open(str(source_path)) as container:
+                stream = container.streams.video[0]
+                if stream.duration and stream.time_base:
+                    return float(stream.duration * stream.time_base)
+                if container.duration:
+                    return float(container.duration / av.time_base)
+        except (av.error.FFmpegError, IndexError, OSError, ValueError) as exc:
+            raise CanvasVideoError(f"无法读取原视频时长：{exc}") from exc
+        raise CanvasVideoError("无法读取原视频时长")
 
     def _extract_keyframes(self, project_id: str, asset_id: str) -> dict[str, Any]:
         source_asset, source_path = self._source_video(project_id, asset_id)
@@ -213,13 +269,20 @@ class CanvasVideoService:
             raise CanvasVideoError("无法读取合成镜头尺寸") from exc
         raise CanvasVideoError("无法读取合成镜头尺寸")
 
-    def _export(self, source_path: Path, asset_id: str) -> tuple[dict[str, Any], Path]:
+    def _export(
+        self,
+        source_path: Path,
+        asset_id: str,
+        *,
+        export_detected_shots: bool = True,
+    ) -> tuple[dict[str, Any], Path]:
         directory = Path(tempfile.mkdtemp(prefix=f"canvas-video-{asset_id[:8]}-"))
         try:
             payload = self.detector.detect(asset_id, source_path)
             if not payload["shots"]:
                 raise CanvasVideoError("没有识别到可用镜头")
-            self.exporter.export(source_path, directory, payload["shots"])
+            if export_detected_shots:
+                self.exporter.export(source_path, directory, payload["shots"])
             return payload, directory
         except ShotDecodeError as exc:
             self._remove_directory(directory)

@@ -98,6 +98,7 @@ export interface CanvasReplaceableObject {
 export interface CanvasReplacementShotPrompt {
   shot_index: number;
   prompt: string;
+  input_revision?: number;
   status: "pending" | "ready" | "queued" | "running" | "succeeded" | "failed";
   provider_task_id?: string;
   result_asset_id?: string;

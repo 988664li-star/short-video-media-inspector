@@ -26,7 +26,7 @@ export function ShotCollectionCapabilities({ id, node, selected }: ShotCollectio
       <button
         type="button"
         disabled={!ready || running}
-        title={ready ? "基于全部镜头关键帧识别视频的主要可替换主体，不罗列普通细节物品" : "分镜组中暂无镜头片段"}
+        title={ready ? "读取每个连续片段的时序分镜图，识别视频的主要可替换主体，不罗列普通细节物品" : "编辑片段组中暂无可分析片段"}
         onClick={() => void analyzeReplaceables(id)}
       >
         {running ? <LoaderCircle className="spin" /> : <ScanSearch />}
