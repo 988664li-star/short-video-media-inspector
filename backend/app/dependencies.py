@@ -1,5 +1,13 @@
 from backend.app.core.config import settings
 from backend.app.services.media import MediaRegistry
+from backend.app.services.canvas_projects import (
+    CanvasAIConfig,
+    CanvasAIService,
+    CanvasMediaExtractionService,
+    CanvasProjectService,
+    CanvasReplacementAnalysisService,
+    CanvasVideoService,
+)
 from backend.app.services.replica_projects import ReplicaProjectService
 from backend.app.services.replica_analysis import (
     ReplicaPlaybookService,
@@ -51,6 +59,37 @@ seedance_workspace_service = SeedanceWorkspaceService(
     settings.seedream_model,
 )
 replica_project_service = ReplicaProjectService(settings.replica_projects_db_path)
+canvas_project_service = CanvasProjectService(
+    settings.canvas_projects_db_path,
+    settings.canvas_projects_data_path,
+)
+canvas_ai_service = CanvasAIService(
+    canvas_project_service,
+    siliconflow_text_client,
+    CanvasAIConfig(
+        image_api_key=settings.seedance_api_key,
+        image_api_url=settings.seedream_api_url,
+        image_model=settings.seedream_model,
+        text_model=settings.replica_text_model,
+    ),
+)
+canvas_media_extraction_service = CanvasMediaExtractionService(
+    canvas_project_service,
+    cookie_store,
+    media_registry,
+    settings.canvas_asset_max_bytes,
+)
+canvas_video_service = CanvasVideoService(
+    canvas_project_service,
+    ffmpeg_binary=settings.shot_detection_ffmpeg_binary,
+    scene_threshold=settings.shot_detection_scene_threshold,
+    min_shot_seconds=settings.shot_detection_min_shot_seconds,
+    max_asset_bytes=settings.canvas_asset_max_bytes,
+)
+canvas_replacement_analysis_service = CanvasReplacementAnalysisService(
+    canvas_project_service,
+    siliconflow_vision_client,
+)
 
 
 def get_cookie_store() -> LoginCookieStore:
@@ -91,3 +130,23 @@ def get_seedance_workspace_service() -> SeedanceWorkspaceService:
 
 def get_replica_project_service() -> ReplicaProjectService:
     return replica_project_service
+
+
+def get_canvas_project_service() -> CanvasProjectService:
+    return canvas_project_service
+
+
+def get_canvas_ai_service() -> CanvasAIService:
+    return canvas_ai_service
+
+
+def get_canvas_media_extraction_service() -> CanvasMediaExtractionService:
+    return canvas_media_extraction_service
+
+
+def get_canvas_video_service() -> CanvasVideoService:
+    return canvas_video_service
+
+
+def get_canvas_replacement_analysis_service() -> CanvasReplacementAnalysisService:
+    return canvas_replacement_analysis_service

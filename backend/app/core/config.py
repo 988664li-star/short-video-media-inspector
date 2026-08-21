@@ -88,6 +88,21 @@ class Settings:
             DEFAULT_BACKEND_DATA_PATH / "replica_projects.sqlite3",
         )
     )
+    canvas_projects_db_path: Path = Path(
+        os.environ.get(
+            "CANVAS_PROJECTS_DB_PATH",
+            DEFAULT_BACKEND_DATA_PATH / "canvas_projects.sqlite3",
+        )
+    )
+    canvas_projects_data_path: Path = Path(
+        os.environ.get(
+            "CANVAS_PROJECTS_DATA_PATH",
+            DEFAULT_BACKEND_DATA_PATH / "canvas_projects",
+        )
+    )
+    canvas_asset_max_bytes: int = int(
+        os.environ.get("CANVAS_ASSET_MAX_BYTES", str(200 * 1024 * 1024))
+    )
     seedance_api_key: str = os.environ.get("ARK_API_KEY", "")
     seedance_api_url: str = os.environ.get(
         "VOLCENGINE_ARK_CONTENT_GENERATION_URL",

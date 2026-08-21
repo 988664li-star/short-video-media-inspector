@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 
 import { AppHeader } from "../components/layout/AppHeader";
 import { WorkspaceNavigation } from "../components/layout/WorkspaceNavigation";
@@ -13,8 +13,14 @@ import { InspectorPage } from "../pages/InspectorPage";
 import { ReplicationPage } from "../pages/ReplicationPage";
 import { WORKSPACE_PAGE_TITLE } from "./workspaceRoutes";
 
+const CreativeCanvasPage = lazy(async () => {
+  const module = await import("../pages/CreativeCanvasPage");
+  return { default: module.CreativeCanvasPage };
+});
+
 export function App() {
   const { page, navigate } = useWorkspaceRoute();
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const inspector = useInspector();
   const drawer = useUserDrawer();
   const handleSessionCleared = useCallback(() => {
@@ -37,32 +43,42 @@ export function App() {
 
   return (
     <>
-      <div className="app-shell">
+      <div className={`app-shell${navigationCollapsed ? " app-shell--nav-collapsed" : ""}`}>
         <WorkspaceNavigation
           activePage={page}
           onNavigate={navigate}
+          collapsed={navigationCollapsed}
+          onToggleCollapsed={() => setNavigationCollapsed((collapsed) => !collapsed)}
         />
         <div className="workspace-frame">
-          <AppHeader />
-          <main className="workspace-main">
-            <div className="page-title"><h1>{WORKSPACE_PAGE_TITLE[page]}</h1></div>
-            {page === "inspector" ? (
-              <InspectorPage
-                inspector={inspector}
-                session={session}
-                onInspect={inspectAweme}
-                onOpenUser={(user) => void drawer.open(user)}
-                onReset={resetInspector}
-              />
-            ) : page === "capabilities" ? (
-              <CapabilitiesPage session={session} onInspect={inspectAweme} onOpenUser={(user) => void drawer.open(user)} />
-            ) : (
-              <ReplicationPage
-                inspector={inspector}
-                onReset={resetInspector}
-              />
-            )}
-          </main>
+          {page === "canvas" ? (
+            <Suspense fallback={<main className="workspace-main workspace-main--canvas"><section className="creative-canvas-loading">正在加载画布…</section></main>}>
+              <CreativeCanvasPage />
+            </Suspense>
+          ) : (
+            <>
+              <AppHeader />
+              <main className="workspace-main">
+                <div className="page-title"><h1>{WORKSPACE_PAGE_TITLE[page]}</h1></div>
+                {page === "inspector" ? (
+                  <InspectorPage
+                    inspector={inspector}
+                    session={session}
+                    onInspect={inspectAweme}
+                    onOpenUser={(user) => void drawer.open(user)}
+                    onReset={resetInspector}
+                  />
+                ) : page === "capabilities" ? (
+                  <CapabilitiesPage session={session} onInspect={inspectAweme} onOpenUser={(user) => void drawer.open(user)} />
+                ) : (
+                  <ReplicationPage
+                    inspector={inspector}
+                    onReset={resetInspector}
+                  />
+                )}
+              </main>
+            </>
+          )}
         </div>
       </div>
       <UserDrawer

@@ -108,6 +108,157 @@ class ReplicaProjectRequest(StrictRequest):
         return self
 
 
+class CanvasProjectCreateRequest(StrictRequest):
+    name: str = Field(default="未命名画布", min_length=1, max_length=80)
+
+
+class CanvasViewportRequest(StrictRequest):
+    x: float = Field(default=14, ge=-100_000, le=100_000)
+    y: float = Field(default=28, ge=-100_000, le=100_000)
+    scale: float = Field(default=0.9, ge=0.1, le=3)
+
+
+class CanvasNodeOperationRequest(StrictRequest):
+    prompt: str = Field(default="", max_length=8_000)
+    model: str = Field(default="", max_length=160)
+    source_url: str | None = Field(default=None, max_length=2_000)
+    referenced_asset_ids: list[str] = Field(default_factory=list, max_length=32)
+    style: str = Field(default="", max_length=80)
+    aspect_ratio: str = Field(default="", max_length=24)
+    quality: str = Field(default="", max_length=24)
+    role_mode: str = Field(default="", max_length=80)
+    status: Literal["idle", "running", "succeeded", "failed"] = "idle"
+    error: str | None = Field(default=None, max_length=2_000)
+    message: str | None = Field(default=None, max_length=600)
+
+
+class CanvasShotAssetRequest(StrictRequest):
+    index: int = Field(ge=1, le=10_000)
+    start_seconds: float = Field(ge=0, le=86_400)
+    end_seconds: float = Field(ge=0, le=86_400)
+    duration_seconds: float = Field(gt=0, le=86_400)
+    asset_id: str = Field(max_length=64, pattern=r"^[a-f0-9]{32}$")
+    asset_url: str = Field(max_length=1_000)
+    asset_name: str = Field(min_length=1, max_length=255)
+
+
+class CanvasAnalysisKeyframeRequest(StrictRequest):
+    shot_index: int = Field(ge=1, le=10_000)
+    asset_id: str = Field(max_length=64, pattern=r"^[a-f0-9]{32}$")
+    asset_url: str = Field(max_length=1_000)
+    asset_name: str = Field(min_length=1, max_length=255)
+
+
+class CanvasReplaceableActionRequest(StrictRequest):
+    shot_index: int = Field(ge=1, le=10_000)
+    description: str = Field(min_length=1, max_length=1_000)
+
+
+class CanvasReplaceableObjectRequest(StrictRequest):
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
+    kind: Literal["product", "person", "background", "text", "other"]
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2_000)
+    shot_indices: list[int] = Field(default_factory=list, max_length=500)
+    actions: list[CanvasReplaceableActionRequest] = Field(default_factory=list, max_length=500)
+
+
+class CanvasReplacementShotPromptRequest(StrictRequest):
+    shot_index: int = Field(ge=1, le=10_000)
+    prompt: str = Field(default="", max_length=8_000)
+    status: Literal["pending", "ready", "generated", "failed"] = "pending"
+
+
+class CanvasReplacementTaskRequest(StrictRequest):
+    analysis_node_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    shot_collection_node_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    source_object_id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
+    source_object_kind: Literal["product", "person", "background", "text", "other"]
+    source_object_name: str = Field(min_length=1, max_length=160)
+    source_object_description: str = Field(default="", max_length=2_000)
+    shot_indices: list[int] = Field(default_factory=list, max_length=500)
+    actions: list[CanvasReplaceableActionRequest] = Field(default_factory=list, max_length=500)
+    target_description: str = Field(default="", max_length=2_000)
+    shot_prompts: list[CanvasReplacementShotPromptRequest] = Field(default_factory=list, max_length=500)
+
+
+class CanvasReferenceAssetRequest(StrictRequest):
+    id: str = Field(max_length=64, pattern=r"^[a-f0-9]{32}$")
+    url: str = Field(max_length=1_000)
+    filename: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(min_length=1, max_length=120)
+
+
+class CanvasNodeRequest(StrictRequest):
+    id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    kind: Literal[
+        "text", "image", "video", "shot_collection", "replaceable_analysis",
+        "replacement_task", "extractor", "music", "audio",
+    ]
+    x: float = Field(ge=-100_000, le=100_000)
+    y: float = Field(ge=-100_000, le=100_000)
+    title: str = Field(min_length=1, max_length=160)
+    detail: str = Field(default="", max_length=600)
+    content: str = Field(default="", max_length=32_768)
+    asset_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-f0-9]{32}$")
+    asset_url: str | None = Field(default=None, max_length=1_000)
+    asset_name: str | None = Field(default=None, max_length=255)
+    source_extractor_id: str | None = Field(
+        default=None, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$"
+    )
+    source_node_id: str | None = Field(
+        default=None, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$"
+    )
+    derived_kind: Literal["shot", "keyframe"] | None = None
+    shot_assets: list[CanvasShotAssetRequest] = Field(default_factory=list, max_length=500)
+    analysis_keyframes: list[CanvasAnalysisKeyframeRequest] = Field(default_factory=list, max_length=500)
+    replaceable_objects: list[CanvasReplaceableObjectRequest] = Field(default_factory=list, max_length=100)
+    replacement_task: CanvasReplacementTaskRequest | None = None
+    reference_assets: list[CanvasReferenceAssetRequest] = Field(default_factory=list, max_length=32)
+    availability_message: str | None = Field(default=None, max_length=600)
+    operation: CanvasNodeOperationRequest | None = None
+
+
+class CanvasEdgeRequest(StrictRequest):
+    id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    source: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    target: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    sourceHandle: str | None = Field(default=None, max_length=64)
+    targetHandle: str | None = Field(default=None, max_length=64)
+
+
+class CanvasProjectUpdateRequest(StrictRequest):
+    name: str = Field(min_length=1, max_length=80)
+    nodes: list[CanvasNodeRequest] = Field(default_factory=list, max_length=500)
+    edges: list[CanvasEdgeRequest] = Field(default_factory=list, max_length=1_000)
+    viewport: CanvasViewportRequest = Field(default_factory=CanvasViewportRequest)
+
+
+class CanvasTextGenerateRequest(StrictRequest):
+    prompt: str = Field(min_length=1, max_length=8_000)
+    context: str = Field(default="", max_length=20_000)
+
+
+class CanvasImageGenerateRequest(StrictRequest):
+    prompt: str = Field(min_length=1, max_length=8_000)
+    source_url: str | None = Field(default=None, max_length=2_000)
+    source_asset_ids: list[str] = Field(default_factory=list, max_length=8)
+    aspect_ratio: Literal["原比例", "9:16", "16:9", "1:1"] = "原比例"
+
+
+class CanvasMediaExtractRequest(StrictRequest):
+    share_text: str = Field(min_length=1, max_length=32_768)
+    platform: Literal["auto", "douyin", "tiktok"] = "auto"
+
+
+class CanvasVideoAssetRequest(StrictRequest):
+    asset_id: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
+
+
+class CanvasReplacementAnalysisRequest(StrictRequest):
+    shots: list[CanvasShotAssetRequest] = Field(min_length=1, max_length=120)
+
+
 class CookieRequest(StrictRequest):
     cookie: str = Field(min_length=1)
 

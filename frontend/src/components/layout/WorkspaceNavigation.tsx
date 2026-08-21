@@ -1,4 +1,4 @@
-import { Clapperboard, FileSearch, LayoutGrid, Play, Replace } from "lucide-react";
+import { Clapperboard, FileSearch, LayoutGrid, PanelLeftClose, PanelLeftOpen, Play, Replace, Workflow } from "lucide-react";
 
 import { WORKSPACE_ROUTE, type WorkspacePage } from "../../app/workspaceRoutes";
 import { CAPABILITIES } from "../../features/capabilities/catalog";
@@ -6,24 +6,40 @@ import { CAPABILITIES } from "../../features/capabilities/catalog";
 interface WorkspaceNavigationProps {
   activePage: WorkspacePage;
   onNavigate: (page: WorkspacePage) => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
 const NAVIGATION_ITEMS = [
   { page: "inspector", label: "作品解析", icon: FileSearch },
   { page: "capabilities", label: "能力中心", icon: LayoutGrid, count: CAPABILITIES.length },
   { page: "replication", label: "爆款复刻", icon: Clapperboard },
+  { page: "canvas", label: "无限画布", icon: Workflow },
 ] as const;
 
 export function WorkspaceNavigation({
   activePage,
   onNavigate,
+  collapsed,
+  onToggleCollapsed,
 }: WorkspaceNavigationProps) {
+  const CollapseIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
+
   return (
-    <nav className="workspace-nav" aria-label="工作区">
+    <nav className={`workspace-nav${collapsed ? " workspace-nav--collapsed" : ""}`} aria-label="工作区">
       <div className="workspace-nav__brand">
         <span className="workspace-nav__brand-mark" aria-hidden="true"><Play /></span>
         <div><strong>短视频媒体检查台</strong><small>抖音 / TikTok</small></div>
       </div>
+      <button
+        className="workspace-nav__collapse"
+        type="button"
+        aria-label={collapsed ? "展开导航栏" : "收起导航栏"}
+        title={collapsed ? "展开导航栏" : "收起导航栏"}
+        onClick={onToggleCollapsed}
+      >
+        <CollapseIcon aria-hidden="true" />
+      </button>
       <div className="workspace-nav__links">
         {NAVIGATION_ITEMS.map((item) => {
           const Icon = item.icon;

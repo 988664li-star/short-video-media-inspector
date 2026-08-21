@@ -8,6 +8,7 @@ from backend.app.api.router import api_router
 from backend.app.core.config import settings
 from backend.app.dependencies import (
     cookie_store,
+    canvas_project_service,
     media_registry,
     replica_project_service,
     seedance_workspace_service,
@@ -29,6 +30,7 @@ async def _privacy_cleanup_loop() -> None:
 async def lifespan(_: FastAPI):
     await asyncio.to_thread(transcription_service.clear_cache)
     await asyncio.to_thread(replica_project_service.initialize)
+    await asyncio.to_thread(canvas_project_service.initialize)
     await asyncio.to_thread(seedance_workspace_service.initialize)
     cleanup_task = asyncio.create_task(_privacy_cleanup_loop())
     try:
