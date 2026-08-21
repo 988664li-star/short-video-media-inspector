@@ -11,6 +11,12 @@ from .extraction import (
 )
 from .video import CanvasVideoError, CanvasVideoService
 from .replacement import CanvasReplacementAnalysisError, CanvasReplacementAnalysisService
+from .prompts import CanvasPromptTemplateError, CanvasPromptTemplates
+from .replacement_tasks import (
+    CanvasReplacementTaskError,
+    CanvasReplacementTaskService,
+    CanvasReplacementVideoConfig,
+)
 
 __all__ = [
     "CanvasAssetNotFoundError",
@@ -26,4 +32,9 @@ __all__ = [
     "CanvasVideoService",
     "CanvasReplacementAnalysisError",
     "CanvasReplacementAnalysisService",
+    "CanvasPromptTemplateError",
+    "CanvasPromptTemplates",
+    "CanvasReplacementTaskError",
+    "CanvasReplacementTaskService",
+    "CanvasReplacementVideoConfig",
 ]

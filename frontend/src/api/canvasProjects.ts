@@ -6,6 +6,8 @@ import type {
   CanvasProject,
   CanvasProjectSummary,
   CanvasReplaceableObject,
+  CanvasReplacementResult,
+  CanvasReplacementShotPrompt,
   CanvasShotAsset,
   CanvasVideoKeyframeResult,
   CanvasVideoShotResult,
@@ -147,5 +149,66 @@ export function analyzeCanvasReplaceables(projectId: string, shots: CanvasShotAs
     `/api/canvas/projects/${projectId}/replacement-analysis`,
     { method: "POST", body: JSON.stringify({ shots }) },
     "可替换对象识别失败",
+  );
+}
+
+export function buildCanvasReplacementPrompts(
+  projectId: string,
+  payload: {
+    source_object_name: string;
+    source_object_description: string;
+    target_description: string;
+    target_asset_ids: string[];
+    shots: CanvasShotAsset[];
+    actions: Array<{ shot_index: number; description: string }>;
+  },
+) {
+  return apiRequest<{ prompts: CanvasReplacementShotPrompt[] }>(
+    `/api/canvas/projects/${projectId}/replacement-prompts`,
+    { method: "POST", body: JSON.stringify(payload) },
+    "逐镜头提示词生成失败",
+  );
+}
+
+export function submitCanvasReplacementTasks(
+  projectId: string,
+  payload: {
+    model: string;
+    target_asset_ids: string[];
+    shots: CanvasShotAsset[];
+    prompts: CanvasReplacementShotPrompt[];
+    confirmed: boolean;
+  },
+) {
+  return apiRequest<{ results: Array<CanvasReplacementResult & { result_asset?: CanvasAsset | null }> }>(
+    `/api/canvas/projects/${projectId}/replacement-tasks`,
+    { method: "POST", body: JSON.stringify(payload) },
+    "逐镜头视频替换提交失败",
+  );
+}
+
+export function refreshCanvasReplacementTask(
+  projectId: string,
+  payload: { provider_task_id: string; shot: CanvasShotAsset; result_asset_id?: string },
+) {
+  return apiRequest<{ result: CanvasReplacementResult & { result_asset?: CanvasAsset | null } }>(
+    `/api/canvas/projects/${projectId}/replacement-tasks/refresh`,
+    { method: "POST", body: JSON.stringify(payload) },
+    "刷新逐镜头视频替换任务失败",
+  );
+}
+
+export function composeCanvasReplacementResults(
+  projectId: string,
+  payload: {
+    shots: CanvasShotAsset[];
+    results: CanvasReplacementResult[];
+    source_audio_asset_id: string;
+  },
+) {
+  return apiRequest<{ asset: CanvasAsset; used_original_shot_indices: number[] }>(
+    `/api/canvas/projects/${projectId}/replacement-compositions`,
+    { method: "POST", body: JSON.stringify(payload) },
+    "逐镜头替换成片合成失败",
   );
 }

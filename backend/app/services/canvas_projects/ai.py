@@ -55,7 +55,6 @@ class CanvasAIService:
                 timeout_seconds=120,
                 temperature=0.7,
                 log_context="canvas.text.generate",
-                enable_thinking=False,
             )
         except SiliconFlowError as exc:
             raise CanvasAIError(str(exc)) from exc

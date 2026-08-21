@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title desc">
+  <title id="title">微服务目标架构（第一版）</title>
+  <desc id="desc">Web 管理端经过 API Gateway 访问用户、内容分析、AI 任务、支付订阅和通知服务；服务分别访问独立存储、消息队列和第三方平台。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker>
+    <marker id="arrowAsync" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0f766e"/></marker>
+    <style>
+      text { font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #172554; }
+      .title { font-size: 30px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #64748b; }
+      .lane { stroke-width: 1.5; stroke-dasharray: 6 6; rx: 18; }
+      .lane-title { font-size: 16px; font-weight: 700; }
+      .box { stroke-width: 1.6; rx: 12; }
+      .box-title { font-size: 17px; font-weight: 700; }
+      .box-note { font-size: 13px; fill: #475569; }
+      .edge { stroke: #64748b; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .async { stroke: #0f766e; stroke-width: 2; stroke-dasharray: 7 5; fill: none; marker-end: url(#arrowAsync); }
+      .edge-label { font-size: 12px; fill: #475569; }
+      .legend { font-size: 13px; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="980" fill="#f8fafc"/>
+  <text x="62" y="58" class="title">微服务目标架构（第一版）</text>
+  <text x="62" y="86" class="subtitle">基于当前 React + FastAPI 内容分析项目的演进建议；用户、支付和消息能力为规划新增</text>
+
+  <!-- Lanes -->
+  <rect x="50" y="130" width="190" height="690" class="lane" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="72" y="163" class="lane-title">客户端</text>
+  <rect x="275" y="130" width="190" height="690" class="lane" fill="#f5f3ff" stroke="#c4b5fd"/>
+  <text x="297" y="163" class="lane-title">接入层</text>
+  <rect x="500" y="130" width="400" height="690" class="lane" fill="#f0fdf4" stroke="#86efac"/>
+  <text x="522" y="163" class="lane-title">业务服务</text>
+  <rect x="935" y="130" width="265" height="690" class="lane" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="957" y="163" class="lane-title">数据存储</text>
+  <rect x="1235" y="130" width="315" height="690" class="lane" fill="#fdf2f8" stroke="#f9a8d4"/>
+  <text x="1257" y="163" class="lane-title">异步与外部平台</text>
+
+  <!-- Client -->
+  <rect x="75" y="390" width="140" height="74" class="box" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="145" y="421" text-anchor="middle" class="box-title">Web 管理端</text>
+  <text x="145" y="445" text-anchor="middle" class="box-note">React + Vite</text>
+
+  <!-- Gateway -->
+  <rect x="300" y="390" width="140" height="74" class="box" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="370" y="421" text-anchor="middle" class="box-title">API Gateway</text>
+  <text x="370" y="445" text-anchor="middle" class="box-note">鉴权、限流、路由</text>
+
+  <!-- Services -->
+  <rect x="530" y="205" width="155" height="82" class="box" fill="#dcfce7" stroke="#4ade80"/>
+  <text x="607" y="237" text-anchor="middle" class="box-title">用户与权限服务</text>
+  <text x="607" y="262" text-anchor="middle" class="box-note">账号、角色、会话</text>
+  <rect x="715" y="205" width="155" height="82" class="box" fill="#dcfce7" stroke="#4ade80"/>
+  <text x="792" y="237" text-anchor="middle" class="box-title">内容分析服务</text>
+  <text x="792" y="262" text-anchor="middle" class="box-note">解析、项目、媒体</text>
+  <rect x="530" y="390" width="155" height="82" class="box" fill="#dcfce7" stroke="#4ade80"/>
+  <text x="607" y="422" text-anchor="middle" class="box-title">AI 任务服务</text>
+  <text x="607" y="447" text-anchor="middle" class="box-note">转写、分镜、生成</text>
+  <rect x="715" y="390" width="155" height="82" class="box" fill="#dcfce7" stroke="#4ade80"/>
+  <text x="792" y="422" text-anchor="middle" class="box-title">支付与订阅服务</text>
+  <text x="792" y="447" text-anchor="middle" class="box-note">订单、权益、回调</text>
+  <rect x="622" y="610" width="155" height="82" class="box" fill="#dcfce7" stroke="#4ade80"/>
+  <text x="699" y="642" text-anchor="middle" class="box-title">通知服务</text>
+  <text x="699" y="667" text-anchor="middle" class="box-note">站内信、邮件、短信</text>
+
+  <!-- Datastores -->
+  <rect x="965" y="205" width="205" height="68" class="box" fill="#ffedd5" stroke="#fb923c"/>
+  <text x="1067" y="233" text-anchor="middle" class="box-title">用户数据库</text>
+  <text x="1067" y="254" text-anchor="middle" class="box-note">用户与权限独立库</text>
+  <rect x="965" y="320" width="205" height="68" class="box" fill="#ffedd5" stroke="#fb923c"/>
+  <text x="1067" y="348" text-anchor="middle" class="box-title">项目与分析数据库</text>
+  <text x="1067" y="369" text-anchor="middle" class="box-note">项目、任务、结果</text>
+  <rect x="965" y="435" width="205" height="68" class="box" fill="#ffedd5" stroke="#fb923c"/>
+  <text x="1067" y="463" text-anchor="middle" class="box-title">订单与订阅数据库</text>
+  <text x="1067" y="484" text-anchor="middle" class="box-note">订单、账单、权益</text>
+  <rect x="965" y="550" width="205" height="68" class="box" fill="#ffedd5" stroke="#fb923c"/>
+  <text x="1067" y="578" text-anchor="middle" class="box-title">对象存储</text>
+  <text x="1067" y="599" text-anchor="middle" class="box-note">视频、图片、分析资产</text>
+  <rect x="965" y="665" width="205" height="68" class="box" fill="#ffedd5" stroke="#fb923c"/>
+  <text x="1067" y="693" text-anchor="middle" class="box-title">Redis</text>
+  <text x="1067" y="714" text-anchor="middle" class="box-note">会话、缓存、限流</text>
+
+  <!-- Async & external -->
+  <rect x="1265" y="205" width="255" height="70" class="box" fill="#ccfbf1" stroke="#14b8a6"/>
+  <text x="1392" y="234" text-anchor="middle" class="box-title">消息队列</text>
+  <text x="1392" y="255" text-anchor="middle" class="box-note">任务、支付、通知事件</text>
+  <rect x="1265" y="350" width="255" height="70" class="box" fill="#fce7f3" stroke="#f472b6"/>
+  <text x="1392" y="379" text-anchor="middle" class="box-title">抖音与 F2</text>
+  <text x="1392" y="400" text-anchor="middle" class="box-note">内容和媒体数据</text>
+  <rect x="1265" y="495" width="255" height="70" class="box" fill="#fce7f3" stroke="#f472b6"/>
+  <text x="1392" y="524" text-anchor="middle" class="box-title">AI 模型服务</text>
+  <text x="1392" y="545" text-anchor="middle" class="box-note">语音、视觉、视频生成</text>
+  <rect x="1265" y="640" width="255" height="70" class="box" fill="#fce7f3" stroke="#f472b6"/>
+  <text x="1392" y="669" text-anchor="middle" class="box-title">支付渠道</text>
+  <text x="1392" y="690" text-anchor="middle" class="box-note">微信支付 / 支付宝 / Stripe</text>
+
+  <!-- Request flows -->
+  <path d="M215 427 H300" class="edge"/><text x="255" y="413" text-anchor="middle" class="edge-label">HTTPS</text>
+  <path d="M440 411 H500 V246 H530" class="edge"/><text x="481" y="322" class="edge-label">认证</text>
+  <path d="M440 427 H715" class="edge"/><text x="555" y="416" class="edge-label">内容与项目</text>
+  <path d="M440 443 H500 V431 H530" class="edge"/><text x="480" y="461" class="edge-label">任务</text>
+  <path d="M440 452 H500 V431 H715" class="edge"/><text x="570" y="486" class="edge-label">下单与订阅</text>
+
+  <!-- Service to data -->
+  <path d="M685 246 H965" class="edge"/><text x="825" y="233" text-anchor="middle" class="edge-label">读写用户</text>
+  <path d="M870 246 H920 V354 H965" class="edge"/><text x="894" y="303" class="edge-label">保存项目</text>
+  <path d="M685 431 H930 V354 H965" class="edge"/>
+  <path d="M870 431 H965" class="edge"/><text x="913" y="419" text-anchor="middle" class="edge-label">订单</text>
+  <path d="M685 652 H920 V246 H965" class="edge"/>
+  <path d="M870 265 H940 V584 H965" class="edge"/>
+  <path d="M685 450 H940 V584 H965" class="edge"/>
+  <path d="M685 275 H950 V699 H965" class="edge"/>
+
+  <!-- Async / external -->
+  <path d="M870 270 H1210 V240 H1265" class="async"/><text x="1145" y="228" text-anchor="middle" class="edge-label">获取数据</text>
+  <path d="M685 450 H1200 V530 H1265" class="async"/><text x="1120" y="518" text-anchor="middle" class="edge-label">模型调用</text>
+  <path d="M870 420 H1210 V675 H1265" class="async"/><text x="1130" y="663" text-anchor="middle" class="edge-label">创建支付</text>
+  <path d="M870 447 H1160 V240 H1265" class="async"/><text x="1110" y="280" text-anchor="middle" class="edge-label">发布事件</text>
+  <path d="M1265 265 H1190 V651 H777" class="async"/><text x="1065" y="639" text-anchor="middle" class="edge-label">消费支付事件</text>
+  <path d="M715 431 H1200 V240 H1265" class="async"/><text x="1100" y="384" text-anchor="middle" class="edge-label">发布任务</text>
+  <path d="M1265 225 H1175 V410 H685" class="async"/><text x="1028" y="398" text-anchor="middle" class="edge-label">消费任务</text>
+
+  <!-- Legend -->
+  <rect x="62" y="868" width="1476" height="70" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <path d="M90 900 H145" class="edge"/><text x="160" y="905" class="legend">同步 API / 数据访问</text>
+  <path d="M370 900 H425" class="async"/><text x="440" y="905" class="legend">异步事件或第三方调用</text>
+  <text x="760" y="905" class="legend">原则：每个服务独立部署、独立数据所有权；跨服务通过 API 或事件协作。</text>
+</svg>

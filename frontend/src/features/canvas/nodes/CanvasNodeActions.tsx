@@ -22,11 +22,17 @@ interface CanvasNodeActionsValue {
   replacementAnalysisNodeId: string | null;
   createReplacementTask: (analysisNodeId: string, objectId: string) => void;
   updateReplacementTask: (nodeId: string, patch: Partial<CanvasReplacementTask>) => void;
+  toggleReplacementShot: (nodeId: string, shotIndex: number) => void;
   updateReplacementShotPrompt: (nodeId: string, shotIndex: number, prompt: string) => void;
-  buildReplacementPrompts: (nodeId: string) => void;
+  buildReplacementPrompts: (nodeId: string) => Promise<void>;
+  submitReplacementTasks: (nodeId: string, shotIndex?: number) => Promise<void>;
+  refreshReplacementTasks: (nodeId: string) => Promise<void>;
+  composeReplacementTask: (nodeId: string) => Promise<void>;
+  addTargetImageNode: (replacementTaskNodeId: string) => void;
   runNode: (nodeId: string) => Promise<void>;
   runExtractor: (nodeId: string) => Promise<void>;
   getUpstreamNodes: (nodeId: string) => CanvasNode[];
+  getCanvasNode: (nodeId: string | undefined) => CanvasNode | undefined;
   previewMedia: (node: CanvasNode) => void;
 }
 

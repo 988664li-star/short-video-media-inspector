@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 from typing import Any
 
+import av
 from backend.app.services.shot_detection.detector import PySceneDetector
 from backend.app.services.shot_detection.errors import ShotDecodeError
 from backend.app.services.shot_detection.exporter import SceneAssetExporter
@@ -33,6 +36,7 @@ class CanvasVideoService:
         self.project_service = project_service
         self.detector = PySceneDetector(scene_threshold, min_shot_seconds)
         self.exporter = SceneAssetExporter(ffmpeg_binary)
+        self.ffmpeg_binary = ffmpeg_binary
         self.max_asset_bytes = max_asset_bytes
 
     async def split_by_shots(self, project_id: str, asset_id: str) -> dict[str, Any]:
@@ -40,6 +44,22 @@ class CanvasVideoService:
 
     async def extract_keyframes(self, project_id: str, asset_id: str) -> dict[str, Any]:
         return await asyncio.to_thread(self._extract_keyframes, project_id, asset_id)
+
+    async def compose_replacements(
+        self,
+        project_id: str,
+        *,
+        shots: list[dict[str, Any]],
+        results: list[dict[str, Any]],
+        source_audio_asset_id: str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._compose_replacements,
+            project_id,
+            shots,
+            results,
+            source_audio_asset_id,
+        )
 
     def _split_by_shots(self, project_id: str, asset_id: str) -> dict[str, Any]:
         source_asset, source_path = self._source_video(project_id, asset_id)
@@ -99,6 +119,80 @@ class CanvasVideoService:
         finally:
             self._remove_directory(directory)
 
+    def _compose_replacements(
+        self,
+        project_id: str,
+        shots: list[dict[str, Any]],
+        results: list[dict[str, Any]],
+        source_audio_asset_id: str,
+    ) -> dict[str, Any]:
+        if not shots:
+            raise CanvasVideoError("没有可合成的镜头")
+        result_by_shot = {int(result["shot_index"]): result for result in results}
+        clip_paths: list[Path] = []
+        for shot in sorted(shots, key=lambda item: int(item["index"])):
+            result = result_by_shot.get(int(shot["index"]))
+            asset_id = str(result.get("result_asset_id") or "") if result and result.get("status") == "succeeded" else str(shot["asset_id"])
+            try:
+                _, clip_path = self.project_service.get_asset_file(project_id, asset_id)
+            except CanvasAssetNotFoundError as exc:
+                raise CanvasVideoError(f"镜头 {int(shot['index']):02d} 的合成素材不存在") from exc
+            clip_paths.append(clip_path)
+        try:
+            audio_asset, audio_path = self.project_service.get_asset_file(project_id, source_audio_asset_id)
+        except CanvasAssetNotFoundError as exc:
+            raise CanvasVideoError("原视频不存在，无法保留原声音轨") from exc
+        if not str(audio_asset.get("mime_type") or "").startswith(("audio/", "video/")):
+            raise CanvasVideoError("原声音轨必须来自视频或音频素材")
+        width, height = self._video_size(clip_paths[0])
+        descriptor, output_name = tempfile.mkstemp(
+            prefix="canvas-replacement-compose-", suffix=".mp4"
+        )
+        os.close(descriptor)
+        output = Path(output_name)
+        try:
+            filters = []
+            for index, shot in enumerate(sorted(shots, key=lambda item: int(item["index"]))):
+                duration = float(shot["duration_seconds"])
+                filters.append(
+                    f"[{index}:v]trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{index}]"
+                )
+            filters.append(
+                "".join(f"[v{index}]" for index in range(len(clip_paths)))
+                + f"concat=n={len(clip_paths)}:v=1:a=0[video]"
+            )
+            command = [self.ffmpeg_binary, "-y", "-hide_banner", "-loglevel", "error"]
+            for path in clip_paths:
+                command.extend(["-i", str(path)])
+            command.extend([
+                "-i", str(audio_path),
+                "-filter_complex", ";".join(filters),
+                "-map", "[video]",
+                "-map", f"{len(clip_paths)}:a?",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-movflags", "+faststart", "-shortest", str(output),
+            ])
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            asset = self._save_file(
+                project_id,
+                "逐镜头替换合成成片.mp4",
+                "video/mp4",
+                output,
+            )
+            return {"asset": asset, "used_original_shot_indices": [
+                int(shot["index"])
+                for shot in shots
+                if result_by_shot.get(int(shot["index"]), {}).get("status") != "succeeded"
+            ]}
+        except FileNotFoundError as exc:
+            raise CanvasVideoError("未安装 FFmpeg，无法合成替换成片") from exc
+        except subprocess.CalledProcessError as exc:
+            raise CanvasVideoError(f"替换成片合成失败：{exc.stderr.strip() or '未知错误'}") from exc
+        finally:
+            output.unlink(missing_ok=True)
+
     def _source_video(self, project_id: str, asset_id: str) -> tuple[dict[str, Any], Path]:
         try:
             asset, source_path = self.project_service.get_asset_file(project_id, asset_id)
@@ -107,6 +201,17 @@ class CanvasVideoService:
         if not str(asset.get("mime_type") or "").startswith("video/"):
             raise CanvasVideoError("当前节点没有可处理的视频素材")
         return asset, source_path
+
+    @staticmethod
+    def _video_size(path: Path) -> tuple[int, int]:
+        try:
+            with av.open(str(path)) as container:
+                stream = next(stream for stream in container.streams if stream.type == "video")
+                if stream.width and stream.height:
+                    return stream.width, stream.height
+        except (av.FFmpegError, StopIteration) as exc:
+            raise CanvasVideoError("无法读取合成镜头尺寸") from exc
+        raise CanvasVideoError("无法读取合成镜头尺寸")
 
     def _export(self, source_path: Path, asset_id: str) -> tuple[dict[str, Any], Path]:
         directory = Path(tempfile.mkdtemp(prefix=f"canvas-video-{asset_id[:8]}-"))

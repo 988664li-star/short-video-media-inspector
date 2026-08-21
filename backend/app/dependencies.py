@@ -6,6 +6,8 @@ from backend.app.services.canvas_projects import (
     CanvasMediaExtractionService,
     CanvasProjectService,
     CanvasReplacementAnalysisService,
+    CanvasReplacementTaskService,
+    CanvasReplacementVideoConfig,
     CanvasVideoService,
 )
 from backend.app.services.replica_projects import ReplicaProjectService
@@ -40,19 +42,20 @@ storyboard_chunk_service = StoryboardChunkService.from_settings(settings)
 storyboard_script_service = StoryboardScriptService(
     settings.shot_detection_data_path, siliconflow_vision_client
 )
+seedance_object_storage = SeedanceObjectStorage(
+    settings.seedance_object_storage_endpoint,
+    settings.seedance_object_storage_access_key,
+    settings.seedance_object_storage_secret_key,
+    settings.seedance_object_storage_bucket,
+    settings.seedance_object_storage_presign_seconds,
+)
 seedance_workspace_service = SeedanceWorkspaceService(
     settings.replica_workspace_db_path,
     settings.seedance_api_key,
     settings.seedance_api_url,
     settings.ark_files_api_url,
     settings.ark_file_max_bytes,
-    SeedanceObjectStorage(
-        settings.seedance_object_storage_endpoint,
-        settings.seedance_object_storage_access_key,
-        settings.seedance_object_storage_secret_key,
-        settings.seedance_object_storage_bucket,
-        settings.seedance_object_storage_presign_seconds,
-    ),
+    seedance_object_storage,
     settings.shot_detection_data_path,
     settings.shot_detection_ffmpeg_binary,
     settings.seedream_api_url,
@@ -89,6 +92,16 @@ canvas_video_service = CanvasVideoService(
 canvas_replacement_analysis_service = CanvasReplacementAnalysisService(
     canvas_project_service,
     siliconflow_vision_client,
+)
+canvas_replacement_task_service = CanvasReplacementTaskService(
+    canvas_project_service,
+    seedance_object_storage,
+    CanvasReplacementVideoConfig(
+        api_key=settings.seedance_api_key,
+        api_url=settings.seedance_api_url,
+        max_asset_bytes=settings.canvas_asset_max_bytes,
+        ffmpeg_binary=settings.shot_detection_ffmpeg_binary,
+    ),
 )
 
 
@@ -150,3 +163,7 @@ def get_canvas_video_service() -> CanvasVideoService:
 
 def get_canvas_replacement_analysis_service() -> CanvasReplacementAnalysisService:
     return canvas_replacement_analysis_service
+
+
+def get_canvas_replacement_task_service() -> CanvasReplacementTaskService:
+    return canvas_replacement_task_service

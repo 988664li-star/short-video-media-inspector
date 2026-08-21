@@ -1,0 +1,836 @@
+openapi: 3.1.0
+info:
+  title: 视频分析平台 API
+  version: 1.0.0-draft
+  description: |
+    第一阶段用户、项目、资产、异步任务、积分、支付与通知接口契约。
+    所有写操作应处理 Idempotency-Key；异步任务返回 202 和 job_id。
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Users
+  - name: Projects
+  - name: Uploads
+  - name: Jobs
+  - name: Billing
+  - name: Notifications
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 邮箱注册
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: 用户已创建，等待邮箱验证
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 验证邮箱
+      operationId: verifyEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 邮箱密码登录
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 返回 access token，并通过 HttpOnly Cookie 设置 refresh token
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: refresh_token; HttpOnly; Secure; SameSite
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 刷新 access token
+      operationId: refreshToken
+      responses:
+        '200':
+          description: 轮换 refresh token，并返回新的 access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: 退出当前设备
+      operationId: logout
+      responses:
+        '204':
+          description: 当前 session 已撤销
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: 退出全部设备
+      operationId: logoutAll
+      responses:
+        '204':
+          description: 所有 session 已撤销
+  /auth/sessions:
+    get:
+      tags: [Auth]
+      summary: 获取当前用户设备会话
+      operationId: listSessions
+      responses:
+        '200':
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListEnvelope'
+  /auth/sessions/{session_id}:
+    delete:
+      tags: [Auth]
+      summary: 退出指定设备
+      operationId: revokeSession
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '204':
+          description: Session 已撤销
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me:
+    get:
+      tags: [Users]
+      summary: 获取当前用户
+      operationId: getMe
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEnvelope'
+  /me/entitlements:
+    get:
+      tags: [Users]
+      summary: 获取能力与限制规则
+      operationId: getEntitlements
+      responses:
+        '200':
+          description: 当前用户可用能力、并发和文件限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementsEnvelope'
+  /uploads/presign:
+    post:
+      tags: [Uploads]
+      summary: 申请 MinIO 预签名上传地址
+      operationId: createUploadPresign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadPresignRequest'
+      responses:
+        '200':
+          description: 浏览器将文件直接 PUT 至 MinIO
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadPresignEnvelope'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /uploads/complete:
+    post:
+      tags: [Uploads]
+      summary: 确认上传完成并创建资产
+      operationId: completeUpload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadCompleteRequest'
+      responses:
+        '201':
+          description: 资产已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetEnvelope'
+  /projects:
+    get:
+      tags: [Projects]
+      summary: 获取当前用户项目
+      operationId: listProjects
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 分页项目列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListEnvelope'
+    post:
+      tags: [Projects]
+      summary: 创建项目
+      operationId: createProject
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: 项目已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEnvelope'
+  /projects/{project_id}:
+    get:
+      tags: [Projects]
+      summary: 获取项目详情
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 项目详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /projects/{project_id}/jobs:
+    post:
+      tags: [Jobs]
+      summary: 创建异步 AI 任务并预扣积分
+      operationId: createJob
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '202':
+          description: 任务已入队
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEnvelope'
+        '402':
+          $ref: '#/components/responses/InsufficientCredits'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /jobs/{job_id}:
+    get:
+      tags: [Jobs]
+      summary: 获取任务状态
+      operationId: getJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: 任务状态和积分信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /jobs/{job_id}/cancel:
+    post:
+      tags: [Jobs]
+      summary: 取消 PENDING 任务（默认不退款）
+      operationId: cancelJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 任务已取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEnvelope'
+        '409':
+          description: 任务已 RUNNING 或已结束，不能由用户取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /jobs/{job_id}/result:
+    get:
+      tags: [Jobs]
+      summary: 获取成功任务的结果
+      operationId: getJobResult
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: 结果索引与资产 ID；下载 URL 需单独申请
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResultEnvelope'
+        '409':
+          description: 任务尚未成功
+  /assets/{asset_id}/download-url:
+    get:
+      tags: [Uploads]
+      summary: 申请资产短期下载地址
+      operationId: getDownloadUrl
+      parameters:
+        - $ref: '#/components/parameters/AssetId'
+      responses:
+        '200':
+          description: MinIO 预签名 GET URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadUrlEnvelope'
+  /billing/products:
+    get:
+      tags: [Billing]
+      summary: 获取已启用积分商品和可选订阅商品
+      operationId: listProducts
+      responses:
+        '200':
+          description: 商品列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListEnvelope'
+  /billing/credits:
+    get:
+      tags: [Billing]
+      summary: 获取当前积分余额
+      operationId: getCredits
+      responses:
+        '200':
+          description: 积分余额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditBalanceEnvelope'
+  /billing/ledger:
+    get:
+      tags: [Billing]
+      summary: 获取积分账本
+      operationId: listCreditLedger
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 分页账本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditLedgerListEnvelope'
+  /billing/orders:
+    post:
+      tags: [Billing]
+      summary: 创建支付订单
+      operationId: createOrder
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: 返回支付跳转地址或支付参数
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderEnvelope'
+  /billing/orders/{order_id}:
+    get:
+      tags: [Billing]
+      summary: 获取订单状态
+      operationId: getOrder
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: 订单详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderEnvelope'
+  /billing/webhooks/{provider}:
+    post:
+      tags: [Billing]
+      security: []
+      summary: 接收支付 Provider 服务端回调
+      operationId: paymentWebhook
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [wechat_pay, alipay]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 回调已处理；实现应按 Provider 规范返回确认格式
+        '400':
+          description: 签名、金额或订单校验失败
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: 获取站内通知
+      operationId: listNotifications
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 分页通知
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListEnvelope'
+  /notifications/{notification_id}/read:
+    post:
+      tags: [Notifications]
+      summary: 标记通知已读
+      operationId: markNotificationRead
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 已标记
+  /health:
+    get:
+      security: []
+      summary: 健康检查
+      operationId: health
+      responses:
+        '200':
+          description: 服务正常
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: 同一用户、同一操作语义下唯一；服务端至少保留 24 小时
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string }
+    AssetId:
+      name: asset_id
+      in: path
+      required: true
+      schema: { type: string }
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema: { type: string }
+    OrderId:
+      name: order_id
+      in: path
+      required: true
+      schema: { type: string }
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema: { type: string }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+  responses:
+    Ok:
+      description: 成功
+    ValidationError:
+      description: 参数验证失败
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthorized:
+      description: 未认证或 Token 无效
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: 无资源归属或能力权限
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: 不存在或不可见
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: 状态冲突或重复资源
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    InsufficientCredits:
+      description: 积分不足
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: INSUFFICIENT_CREDITS }
+            message: { type: string, example: 可用积分不足 }
+            details: { type: object, additionalProperties: true }
+        request_id: { type: string }
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 12 }
+        display_name: { type: string, maxLength: 80 }
+    VerifyEmailRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email: { type: string, format: email }
+        code: { type: string, minLength: 6, maxLength: 12 }
+    LoginRequest:
+      type: object
+      required: [email, password, device_id]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        device_id: { type: string, maxLength: 128 }
+        device_name: { type: string, maxLength: 128 }
+    User:
+      type: object
+      required: [id, email, status, created_at]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        status: { type: string, enum: [PENDING, ACTIVE, SUSPENDED, DELETED] }
+        roles: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+    UserEnvelope:
+      type: object
+      required: [data, request_id]
+      properties:
+        data: { $ref: '#/components/schemas/User' }
+        request_id: { type: string }
+    AuthEnvelope:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          required: [access_token, token_type, expires_in, user]
+          properties:
+            access_token: { type: string }
+            token_type: { type: string, const: Bearer }
+            expires_in: { type: integer, example: 900 }
+            user: { $ref: '#/components/schemas/User' }
+        request_id: { type: string }
+    Session:
+      type: object
+      properties:
+        id: { type: string }
+        device_id: { type: string }
+        device_name: { type: string }
+        last_seen_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        is_current: { type: boolean }
+    SessionListEnvelope:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Session' } }
+        request_id: { type: string }
+    EntitlementsEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            capabilities: { type: array, items: { type: string } }
+            max_concurrent_jobs: { type: integer }
+            max_upload_bytes: { type: integer }
+            max_video_seconds: { type: integer }
+        request_id: { type: string }
+    UploadPresignRequest:
+      type: object
+      required: [project_id, filename, content_type, size_bytes]
+      properties:
+        project_id: { type: string }
+        filename: { type: string }
+        content_type: { type: string }
+        size_bytes: { type: integer, minimum: 1 }
+        checksum_sha256: { type: string }
+    UploadPresignEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            upload_id: { type: string }
+            method: { type: string, const: PUT }
+            upload_url: { type: string, format: uri }
+            expires_at: { type: string, format: date-time }
+            required_headers: { type: object, additionalProperties: { type: string } }
+        request_id: { type: string }
+    UploadCompleteRequest:
+      type: object
+      required: [upload_id]
+      properties:
+        upload_id: { type: string }
+        checksum_sha256: { type: string }
+    Asset:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        content_type: { type: string }
+        size_bytes: { type: integer }
+        status: { type: string, enum: [READY, DELETED] }
+        created_at: { type: string, format: date-time }
+    AssetEnvelope:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/Asset' }
+        request_id: { type: string }
+    DownloadUrlEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            download_url: { type: string, format: uri }
+            expires_at: { type: string, format: date-time }
+        request_id: { type: string }
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+    Project:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+    ProjectEnvelope:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/Project' }
+        request_id: { type: string }
+    ProjectListEnvelope:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Project' } }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        request_id: { type: string }
+    CreateJobRequest:
+      type: object
+      required: [capability, input_asset_id]
+      properties:
+        capability: { type: string, example: media.transcription }
+        input_asset_id: { type: string }
+        options: { type: object, additionalProperties: true }
+    Job:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        capability: { type: string }
+        status:
+          type: string
+          enum: [CREATING, PENDING, RUNNING, SUCCESS, FAILED, CANCELED, REVIEW_REQUIRED]
+        credits_reserved: { type: integer }
+        credits_final: { type: integer }
+        failure_code: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    JobEnvelope:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/Job' }
+        request_id: { type: string }
+    JobResultEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            job_id: { type: string }
+            result: { type: object, additionalProperties: true }
+            output_asset_ids: { type: array, items: { type: string } }
+        request_id: { type: string }
+    Product:
+      type: object
+      properties:
+        id: { type: string }
+        product_type: { type: string, enum: [CREDIT_PACK, SUBSCRIPTION] }
+        name: { type: string }
+        price_amount: { type: string, example: '29.90' }
+        currency: { type: string, example: CNY }
+        credits_grant: { type: integer }
+    ProductListEnvelope:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        request_id: { type: string }
+    CreateOrderRequest:
+      type: object
+      required: [product_id, provider]
+      properties:
+        product_id: { type: string }
+        provider: { type: string, enum: [wechat_pay, alipay] }
+    Order:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PENDING, PAYING, PAID, CLOSED, REFUNDED, FAILED] }
+        amount: { type: string, example: '29.90' }
+        currency: { type: string, example: CNY }
+        provider: { type: string }
+        payment_url: { type: string, format: uri }
+        payment_params: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    OrderEnvelope:
+      type: object
+      properties:
+        data: { $ref: '#/components/schemas/Order' }
+        request_id: { type: string }
+    CreditBalanceEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            available_credits: { type: integer }
+            reserved_credits: { type: integer }
+        request_id: { type: string }
+    CreditLedgerEntry:
+      type: object
+      properties:
+        id: { type: string }
+        entry_type: { type: string, enum: [CREDIT_GRANT, CREDIT_RESERVE, CREDIT_SETTLE, CREDIT_REFUND, CREDIT_EXPIRE] }
+        amount: { type: integer }
+        balance_after: { type: integer }
+        reference_type: { type: string }
+        reference_id: { type: string }
+        occurred_at: { type: string, format: date-time }
+    CreditLedgerListEnvelope:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/CreditLedgerEntry' } }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        request_id: { type: string }
+    Notification:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        payload: { type: object, additionalProperties: true }
+        read_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    NotificationListEnvelope:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        request_id: { type: string }
+    Pagination:
+      type: object
+      properties:
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }

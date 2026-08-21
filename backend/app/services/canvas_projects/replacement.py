@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import av
+from PIL import Image, ImageDraw
 
 from backend.app.services.siliconflow import SiliconFlowClient, SiliconFlowError
 
+from .prompts import CanvasPromptTemplateError, CanvasPromptTemplates
 from .service import CanvasAssetNotFoundError, CanvasProjectService
 
 
@@ -20,35 +22,42 @@ class CanvasReplacementAnalysisError(RuntimeError):
 
 
 class CanvasReplacementAnalysisService:
-    """Extract one durable visual anchor per shot and analyse it with a vision model."""
+    """Extract durable shot anchors, then analyse compact numbered contact sheets once."""
 
-    def __init__(self, project_service: CanvasProjectService, vision_client: SiliconFlowClient) -> None:
+    _CONTACT_SHEET_COLUMNS = 3
+    _CONTACT_SHEET_ROWS = 2
+    _CONTACT_SHEET_TILE_SIZE = (320, 568)
+
+    def __init__(
+        self,
+        project_service: CanvasProjectService,
+        vision_client: SiliconFlowClient,
+        prompt_templates: CanvasPromptTemplates | None = None,
+    ) -> None:
         self.project_service = project_service
         self.vision_client = vision_client
+        self.prompt_templates = prompt_templates
 
     async def analyze(self, project_id: str, shots: list[dict[str, Any]]) -> dict[str, Any]:
         keyframes = await asyncio.to_thread(self._extract_keyframes, project_id, shots)
         if not keyframes:
             raise CanvasReplacementAnalysisError("没有提取到可用于对象识别的镜头关键帧")
         try:
+            prompt_templates = self.prompt_templates or CanvasPromptTemplates.load()
+        except CanvasPromptTemplateError as exc:
+            raise CanvasReplacementAnalysisError(str(exc)) from exc
+        try:
             result, _ = await self.vision_client.complete_json(
-                system_prompt=(
-                    "你是短视频局部替换工作流的视觉分析器。根据按时间顺序提供的镜头关键帧，"
-                    "识别可替换的主体，并将同一对象跨镜头合并为一个对象。可替换对象包括商品、人物、"
-                    "背景、屏幕或画面文字，以及其他清晰的独立对象。不要把手、桌面、光线等普通组成部分"
-                    "单独列为对象，除非它们是画面明确要替换的主体。"
-                    "必须只返回 JSON 对象，包含 objects 数组。每个对象字段："
-                    "kind（product/person/background/text/other）、name、description、shot_indices、actions。"
-                    "actions 是数组，每项含 shot_index 和 description；description 要说明该对象在该镜头的"
-                    "位置、状态、人物交互或镜头表现，供后续逐镜头替换提示词使用。"
-                    "同一件商品或同一人物务必合并，shot_indices 按升序且只包含实际出现的镜头。"
+                system_prompt=prompt_templates.replacement_analysis_system,
+                content=self._vision_content(
+                    project_id,
+                    keyframes,
+                    prompt_templates.replacement_analysis_user,
                 ),
-                content=self._vision_content(project_id, keyframes),
                 max_tokens=4_096,
                 timeout_seconds=180,
                 temperature=0.1,
                 log_context="canvas.replacement.analyze",
-                enable_thinking=False,
             )
         except SiliconFlowError as exc:
             raise CanvasReplacementAnalysisError(str(exc)) from exc
@@ -104,26 +113,62 @@ class CanvasReplacementAnalysisService:
         image.save(buffer, format="JPEG", quality=84, optimize=True)
         return buffer.getvalue()
 
-    def _vision_content(self, project_id: str, keyframes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _vision_content(
+        self,
+        project_id: str,
+        keyframes: list[dict[str, Any]],
+        instruction: str,
+    ) -> list[dict[str, Any]]:
+        contact_sheets = self._contact_sheets(project_id, keyframes)
         content: list[dict[str, Any]] = [{
             "type": "text",
-            "text": (
-                "以下图片按镜头顺序给出。图片序号和镜头编号一一对应："
-                + "、".join(str(item["shot_index"]) for item in keyframes)
-                + "。请识别同一主体跨镜头的连续出现情况。"
-            ),
+            "text": instruction,
         }]
-        for item in keyframes:
-            try:
-                _, path = self.project_service.get_asset_file(project_id, item["asset"]["id"])
-            except CanvasAssetNotFoundError as exc:
-                raise CanvasReplacementAnalysisError("分析关键帧保存失败") from exc
-            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        for contact_sheet in contact_sheets:
+            encoded = base64.b64encode(contact_sheet).decode("ascii")
             content.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
             })
         return content
+
+    def _contact_sheets(self, project_id: str, keyframes: list[dict[str, Any]]) -> list[bytes]:
+        capacity = self._CONTACT_SHEET_COLUMNS * self._CONTACT_SHEET_ROWS
+        sheets: list[bytes] = []
+        for offset in range(0, len(keyframes), capacity):
+            batch = keyframes[offset:offset + capacity]
+            tile_width, tile_height = self._CONTACT_SHEET_TILE_SIZE
+            canvas = Image.new(
+                "RGB",
+                (tile_width * self._CONTACT_SHEET_COLUMNS, tile_height * self._CONTACT_SHEET_ROWS),
+                "#0b1420",
+            )
+            draw = ImageDraw.Draw(canvas)
+            for position, item in enumerate(batch):
+                try:
+                    _, path = self.project_service.get_asset_file(project_id, item["asset"]["id"])
+                except CanvasAssetNotFoundError as exc:
+                    raise CanvasReplacementAnalysisError("分析关键帧保存失败") from exc
+                try:
+                    with Image.open(path) as source:
+                        image = source.convert("RGB")
+                except OSError as exc:
+                    raise CanvasReplacementAnalysisError("分析关键帧无法拼接") from exc
+                image.thumbnail((tile_width, tile_height))
+                column = position % self._CONTACT_SHEET_COLUMNS
+                row = position // self._CONTACT_SHEET_COLUMNS
+                origin_x = column * tile_width
+                origin_y = row * tile_height
+                canvas.paste(image, (
+                    origin_x + (tile_width - image.width) // 2,
+                    origin_y + (tile_height - image.height) // 2,
+                ))
+                draw.rectangle((origin_x + 10, origin_y + 10, origin_x + 104, origin_y + 38), fill="#06101b")
+                draw.text((origin_x + 16, origin_y + 16), str(item["shot_index"]), fill="#ffffff")
+            output = BytesIO()
+            canvas.save(output, format="JPEG", quality=82, optimize=True)
+            sheets.append(output.getvalue())
+        return sheets
 
     @staticmethod
     def _normalise_objects(result: dict[str, Any], valid_shots: set[int]) -> list[dict[str, Any]]:
@@ -132,7 +177,7 @@ class CanvasReplacementAnalysisService:
             raise CanvasReplacementAnalysisError("视觉模型没有返回可替换对象列表")
         allowed_kinds = {"product", "person", "background", "text", "other"}
         objects: list[dict[str, Any]] = []
-        for index, raw in enumerate(raw_objects[:40], start=1):
+        for index, raw in enumerate(raw_objects[:3], start=1):
             if not isinstance(raw, dict):
                 continue
             kind = str(raw.get("kind") or "other").lower()
@@ -141,10 +186,12 @@ class CanvasReplacementAnalysisService:
             name = str(raw.get("name") or "").strip()[:160]
             if not name:
                 continue
-            shot_indices = sorted({
-                int(item) for item in raw.get("shot_indices", [])
-                if isinstance(item, int) and item in valid_shots
-            })
+            raw_shot_indices = raw.get("shot_indices", [])
+            if not all(isinstance(item, int) and not isinstance(item, bool) for item in raw_shot_indices):
+                raise CanvasReplacementAnalysisError(
+                    f"主体“{name}”的 shot_indices 必须使用整数镜头号，例如 [1, 2]，不能使用 SHOT01"
+                )
+            shot_indices = sorted({item for item in raw_shot_indices if item in valid_shots})
             if not shot_indices:
                 continue
             actions: list[dict[str, Any]] = []
@@ -155,7 +202,7 @@ class CanvasReplacementAnalysisService:
                         continue
                     shot_index = action.get("shot_index")
                     description = str(action.get("description") or "").strip()[:1_000]
-                    if isinstance(shot_index, int) and shot_index in shot_indices and description:
+                    if isinstance(shot_index, int) and not isinstance(shot_index, bool) and shot_index in shot_indices and description:
                         actions.append({"shot_index": shot_index, "description": description})
             action_shots = {item["shot_index"] for item in actions}
             actions.extend({

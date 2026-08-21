@@ -26,11 +26,11 @@ export function ShotCollectionCapabilities({ id, node, selected }: ShotCollectio
       <button
         type="button"
         disabled={!ready || running}
-        title={ready ? "为每个镜头抽取关键帧，并识别可替换的商品、人物、背景和文字" : "分镜组中暂无镜头片段"}
+        title={ready ? "基于全部镜头关键帧识别视频的主要可替换主体，不罗列普通细节物品" : "分镜组中暂无镜头片段"}
         onClick={() => void analyzeReplaceables(id)}
       >
         {running ? <LoaderCircle className="spin" /> : <ScanSearch />}
-        {running ? "正在识别可替换对象…" : "识别可替换对象"}
+        {running ? "正在识别主要替换主体…" : "识别主要替换主体"}
       </button>
     </NodeToolbar>
   );

@@ -1,5 +1,8 @@
 from backend.app.services.canvas_projects import CanvasProjectService
-from backend.app.schemas.requests import CanvasProjectUpdateRequest
+from backend.app.schemas.requests import (
+    CanvasProjectUpdateRequest,
+    CanvasReplacementCompositionRequest,
+)
 
 
 def test_canvas_project_is_persisted_with_an_empty_document_and_local_assets(tmp_path):
@@ -102,6 +105,13 @@ def test_shot_collection_node_keeps_all_local_shot_assets():
                 "asset_id": "a" * 32,
                 "asset_url": "/api/canvas/projects/project/assets/" + "a" * 32,
                 "asset_name": "shot-01.mp4",
+                "replacement_versions": [{
+                    "task_node_id": "task-1",
+                    "source_object_id": "object-1",
+                    "source_object_name": "深色编织托盘",
+                    "provider_task_id": "task-01",
+                    "status": "queued",
+                }],
             }, {
                 "index": 2,
                 "start_seconds": 2.5,
@@ -119,6 +129,7 @@ def test_shot_collection_node_keeps_all_local_shot_assets():
     assert request.nodes[0].kind == "shot_collection"
     assert [shot.asset_name for shot in request.nodes[0].shot_assets] == ["shot-01.mp4", "shot-02.mp4"]
     assert request.nodes[0].reference_assets[0].filename == "product-reference.png"
+    assert request.nodes[0].shot_assets[0].replacement_versions[0].provider_task_id == "task-01"
 
 
 def test_replacement_analysis_and_task_nodes_persist_their_shot_level_prompt_data():
@@ -165,6 +176,7 @@ def test_replacement_analysis_and_task_nodes_persist_their_shot_level_prompt_dat
                 "shot_indices": [1, 2],
                 "actions": [{"shot_index": 1, "description": "桌面静态展示"}],
                 "target_description": "浅色木质托盘",
+                "selected_shot_indices": [1],
                 "shot_prompts": [{"shot_index": 1, "prompt": "替换当前镜头中的托盘", "status": "ready"}],
             },
         }],
@@ -175,3 +187,33 @@ def test_replacement_analysis_and_task_nodes_persist_their_shot_level_prompt_dat
     analysis, task = request.nodes
     assert analysis.replaceable_objects[0].name == "深色编织托盘"
     assert task.replacement_task.shot_prompts[0].status == "ready"
+    assert task.replacement_task.selected_shot_indices == [1]
+
+
+def test_replacement_composition_request_keeps_original_audio_and_all_shots():
+    request = CanvasReplacementCompositionRequest.model_validate({
+        "source_audio_asset_id": "a" * 32,
+        "shots": [{
+            "index": 1,
+            "start_seconds": 0,
+            "end_seconds": 2.5,
+            "duration_seconds": 2.5,
+            "asset_id": "b" * 32,
+            "asset_url": "/api/canvas/projects/project/assets/" + "b" * 32,
+            "asset_name": "shot-01.mp4",
+        }],
+        "results": [{
+            "shot_index": 1,
+            "source_asset_id": "b" * 32,
+            "source_asset_name": "shot-01.mp4",
+            "duration_seconds": 2.5,
+            "provider_task_id": "task-01",
+            "status": "succeeded",
+            "result_asset_id": "c" * 32,
+            "result_asset_url": "/api/canvas/projects/project/assets/" + "c" * 32,
+            "result_asset_name": "result-01.mp4",
+        }],
+    })
+
+    assert request.source_audio_asset_id == "a" * 32
+    assert request.results[0].result_asset_id == "c" * 32

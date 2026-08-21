@@ -59,6 +59,20 @@ export interface CanvasShotAsset {
   asset_id: string;
   asset_url: string;
   asset_name: string;
+  replacement_versions?: CanvasShotReplacementVersion[];
+}
+
+/** One generated replacement version belonging to a source shot. */
+export interface CanvasShotReplacementVersion {
+  task_node_id: string;
+  source_object_id: string;
+  source_object_name: string;
+  provider_task_id: string;
+  status: "pending" | "queued" | "running" | "succeeded" | "failed";
+  result_asset_id?: string;
+  result_asset_url?: string;
+  result_asset_name?: string;
+  error?: string;
 }
 
 export type CanvasReplaceableKind = "product" | "person" | "background" | "text" | "other";
@@ -84,13 +98,30 @@ export interface CanvasReplaceableObject {
 export interface CanvasReplacementShotPrompt {
   shot_index: number;
   prompt: string;
-  status: "pending" | "ready" | "generated" | "failed";
+  status: "pending" | "ready" | "queued" | "running" | "succeeded" | "failed";
+  provider_task_id?: string;
+  result_asset_id?: string;
+  error?: string;
+}
+
+export interface CanvasReplacementResult {
+  shot_index: number;
+  source_asset_id: string;
+  source_asset_name: string;
+  duration_seconds: number;
+  provider_task_id: string;
+  status: "pending" | "queued" | "running" | "succeeded" | "failed" | "original";
+  result_asset_id?: string;
+  result_asset_url?: string;
+  result_asset_name?: string;
+  error?: string;
 }
 
 /** Configuration held by one compact per-object, multi-shot replacement task. */
 export interface CanvasReplacementTask {
   analysis_node_id: string;
   shot_collection_node_id: string;
+  output_shot_collection_node_id?: string;
   source_object_id: string;
   source_object_kind: CanvasReplaceableKind;
   source_object_name: string;
@@ -98,6 +129,7 @@ export interface CanvasReplacementTask {
   shot_indices: number[];
   actions: Array<{ shot_index: number; description: string }>;
   target_description: string;
+  selected_shot_indices: number[];
   shot_prompts: CanvasReplacementShotPrompt[];
 }
 

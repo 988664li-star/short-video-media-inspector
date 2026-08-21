@@ -77,7 +77,6 @@ class ReplicaPlaybookService:
                     timeout_seconds=180,
                     temperature=0.2,
                     log_context=f"替换方案 analysis_id={analysis_id}",
-                    enable_thinking=False,
                 )
             except SiliconFlowError as exc:
                 raise ReplicaAnalysisModelError(str(exc)) from exc

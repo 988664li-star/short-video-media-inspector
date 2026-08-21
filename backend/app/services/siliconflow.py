@@ -64,7 +64,6 @@ class SiliconFlowClient:
         timeout_seconds: float,
         temperature: float,
         log_context: str = "",
-        enable_thinking: bool | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         if not self.config.api_key:
             raise SiliconFlowConfigurationError(
@@ -81,8 +80,6 @@ class SiliconFlowClient:
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
-        if enable_thinking is not None:
-            payload["enable_thinking"] = enable_thinking
         timeout = httpx.Timeout(connect=20, read=timeout_seconds, write=30, pool=20)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -119,18 +116,29 @@ class SiliconFlowClient:
                 raise SiliconFlowRequestError(
                     f"模型返回空内容（finish_reason={finish_reason}）；请查看完整 API 响应日志"
                 )
-            logger.info(
-                "SiliconFlow 原始模型返回%s [model=%s]: %s",
+            logger.warning(
+                "AI 原始 content 输出%s [model=%s]: %s",
                 f" [{log_context}]" if log_context else "",
                 self.config.model,
                 raw_content,
             )
-            result = json.loads(
-                raw_content.removeprefix("```json").removesuffix("```").strip()
-            )
+            reasoning_content = message.get("reasoning_content")
+            if isinstance(reasoning_content, str) and reasoning_content.strip():
+                logger.warning(
+                    "AI 意外返回 reasoning_content%s [model=%s]: %s",
+                    f" [{log_context}]" if log_context else "",
+                    self.config.model,
+                    reasoning_content.strip(),
+                )
+            result = json.loads(raw_content)
         except SiliconFlowRequestError:
             raise
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        except json.JSONDecodeError as exc:
+            response_excerpt = raw_content.replace("\x00", "").strip()[:1_500]
+            raise SiliconFlowRequestError(
+                f"模型未按约定返回纯 JSON，原始响应：{response_excerpt}"
+            ) from exc
+        except (KeyError, IndexError, TypeError) as exc:
             raise SiliconFlowRequestError("视觉模型没有返回有效的 JSON 结果") from exc
         if not isinstance(result, dict):
             raise SiliconFlowRequestError("视觉模型返回的数据格式不正确")

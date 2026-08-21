@@ -21,11 +21,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   analyzeCanvasReplaceables,
+  buildCanvasReplacementPrompts,
+  composeCanvasReplacementResults,
   extractCanvasMedia,
   extractCanvasVideoKeyframes,
   generateCanvasImage,
   generateCanvasText,
   splitCanvasVideoByShots,
+  submitCanvasReplacementTasks,
+  refreshCanvasReplacementTask,
 } from "../../api/canvasProjects";
 import type {
   CanvasAsset,
@@ -36,6 +40,9 @@ import type {
   CanvasNodeKind,
   CanvasNodeOperation,
   CanvasReplacementTask,
+  CanvasReplacementResult,
+  CanvasReplacementShotPrompt,
+  CanvasShotReplacementVersion,
   CanvasReplaceableObject,
   CanvasViewport,
 } from "../../types/canvas";
@@ -86,11 +93,12 @@ const defaultEdgeOptions = {
 
 const TEXT_MODEL = "Qwen/Qwen3.6-27B";
 const IMAGE_MODEL = "doubao-seedream-5-0-260128";
+const SEEDANCE_MODEL = "doubao-seedance-2-0-mini-260615";
 
 function initialOperation(kind: CanvasNodeKind): CanvasNodeOperation {
   return {
     prompt: "",
-    model: kind === "image" ? IMAGE_MODEL : kind === "text" ? TEXT_MODEL : "",
+    model: kind === "image" ? IMAGE_MODEL : kind === "text" ? TEXT_MODEL : kind === "replacement_task" ? SEEDANCE_MODEL : "",
     source_url: "",
     referenced_asset_ids: [],
     style: "自然",
@@ -174,8 +182,23 @@ function extractedMediaNodes(
 }
 
 function toFlowNode(node: CanvasNode): CanvasFlowNode {
+  const replacementTask = node.replacement_task
+    ? {
+      ...node.replacement_task,
+      selected_shot_indices: Array.isArray(node.replacement_task.selected_shot_indices)
+        ? node.replacement_task.selected_shot_indices
+        : node.replacement_task.shot_indices,
+      shot_prompts: node.replacement_task.shot_prompts.map((prompt) => ({
+        ...prompt,
+        provider_task_id: prompt.provider_task_id ?? "",
+        result_asset_id: prompt.result_asset_id ?? "",
+        error: prompt.error ?? "",
+      })),
+    }
+    : undefined;
   const normalizedNode = {
     ...node,
+    replacement_task: replacementTask,
     operation: node.operation ?? initialOperation(node.kind),
   };
   return {
@@ -227,30 +250,9 @@ function replaceableKindLabel(kind: CanvasReplaceableObject["kind"]) {
   }[kind];
 }
 
-function buildShotReplacementPrompt(
-  task: CanvasReplacementTask,
-  shotIndex: number,
-  targetImageCount: number,
-) {
-  const action = task.actions.find((item) => item.shot_index === shotIndex)?.description
-    || `${task.source_object_name} 出现在当前镜头中，保持原有位置、动作与遮挡关系。`;
-  const targetReference = targetImageCount
-    ? `@图片1${targetImageCount > 1 ? ` 至 @图片${targetImageCount}` : ""}`
-    : "已连接的目标参考素材";
-  const targetDescription = task.target_description.trim() || "以目标参考素材中的外观、结构、颜色和材质为准";
-  return [
-    "任务：替换 @视频1 中指定的源对象。",
-    "",
-    `目标对象：${targetReference}。${targetDescription}。`,
-    `源对象：${task.source_object_name}${task.source_object_description ? `（${task.source_object_description}）` : ""}。`,
-    "",
-    `当前镜头：${action}`,
-    `替换动作：将当前镜头中的“${task.source_object_name}”替换为目标对象。`,
-    "",
-    "保留规则：只替换上述对象。保持原视频的镜头顺序、动作、运镜、人物、背景、构图、遮挡关系、光线和所有未提及内容不变。目标对象在本任务所有镜头中必须保持为同一对象，外观、颜色、结构和细节一致，并保持原画面中的交互状态。",
-    "",
-    "输出规则：高清、自然色彩、稳定画面、连贯动作。不要新增场景、字幕、文字、水印或 Logo；不要变形、穿模、卡顿或改变未替换内容。",
-  ].join("\n");
+function replacementPromptStatus(status: CanvasReplacementResult["status"]): CanvasReplacementShotPrompt["status"] {
+  if (status === "succeeded" || status === "failed" || status === "running" || status === "queued") return status;
+  return "pending";
 }
 
 export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploadAsset }: CanvasWorkspaceProps) {
@@ -265,6 +267,7 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
   const [uploadError, setUploadError] = useState("");
   const canvasElement = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<number | null>(null);
+  const replacementPollingTimer = useRef<number | null>(null);
   const documentChange = useRef(onDocumentChange);
   const dirty = useRef(false);
 
@@ -414,6 +417,10 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
     .filter((edge) => edge.target === nodeId)
     .map((edge) => nodes.find((node) => node.id === edge.source)?.data.node)
     .filter((node): node is CanvasNode => Boolean(node)), [edges, nodes]);
+
+  const getCanvasNode = useCallback((nodeId: string | undefined): CanvasNode | undefined => (
+    nodeId ? nodes.find((node) => node.id === nodeId)?.data.node : undefined
+  ), [nodes]);
 
   const runNode = useCallback(async (nodeId: string) => {
     const flowNode = nodes.find((node) => node.id === nodeId);
@@ -703,7 +710,7 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
     }
     if (replacementAnalysisNodeId) return;
     setReplacementAnalysisNodeId(nodeId);
-    updateOperation(nodeId, { status: "running", error: "", message: "正在抽取镜头关键帧并识别可替换对象…" });
+    updateOperation(nodeId, { status: "running", error: "", message: "正在抽取镜头关键帧并识别主要替换主体…" });
     try {
       const result = await analyzeCanvasReplaceables(projectId, shots);
       const existingOutputIds = new Set(nodes
@@ -714,8 +721,8 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
         kind: "replaceable_analysis",
         x: source.position.x + 510,
         y: source.position.y - 12,
-        title: `可替换对象 · ${result.objects.length} 项`,
-        detail: `已基于 ${result.keyframes.length} 个镜头关键帧完成对象识别`,
+        title: `主要替换主体 · ${result.objects.length} 项`,
+        detail: `已基于 ${result.keyframes.length} 个镜头关键帧完成主要主体识别`,
         content: "",
         source_node_id: nodeId,
         analysis_keyframes: result.keyframes.map((frame) => ({
@@ -742,12 +749,12 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
             ...node,
             data: { node: {
               ...node.data.node,
-              detail: `已识别 ${result.objects.length} 个可替换对象；选择对象后可创建镜头替换任务`,
+              detail: `已识别 ${result.objects.length} 个主要替换主体；选择对象后可创建镜头替换任务`,
               operation: {
                 ...(node.data.node.operation ?? initialOperation("shot_collection")),
                 status: "succeeded" as const,
                 error: "",
-                message: `已识别 ${result.objects.length} 个可替换对象`,
+                message: `已识别 ${result.objects.length} 个主要替换主体`,
               },
             } },
           } : node),
@@ -793,6 +800,7 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
       shot_indices: sourceObject.shot_indices,
       actions: sourceObject.actions,
       target_description: "",
+      selected_shot_indices: sourceObject.shot_indices,
       shot_prompts: sourceObject.shot_indices.map((shotIndex) => ({ shot_index: shotIndex, prompt: "", status: "pending" })),
     };
     const taskNode = toFlowNode({
@@ -830,6 +838,17 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
     } : node));
   }, [setNodes]);
 
+  const toggleReplacementShot = useCallback((nodeId: string, shotIndex: number) => {
+    const task = nodes.find((node) => node.id === nodeId)?.data.node.replacement_task;
+    if (!task) return;
+    const selected = task.selected_shot_indices.includes(shotIndex)
+      ? task.selected_shot_indices.filter((index) => index !== shotIndex)
+      : [...task.selected_shot_indices, shotIndex].sort((left, right) => left - right);
+    updateReplacementTask(nodeId, {
+      selected_shot_indices: selected,
+    });
+  }, [nodes, updateReplacementTask]);
+
   const updateReplacementShotPrompt = useCallback((nodeId: string, shotIndex: number, prompt: string) => {
     const task = nodes.find((node) => node.id === nodeId)?.data.node.replacement_task;
     if (!task) return;
@@ -840,28 +859,410 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
     });
   }, [nodes, updateReplacementTask]);
 
-  const buildReplacementPrompts = useCallback((nodeId: string) => {
+  const buildReplacementPrompts = useCallback(async (nodeId: string) => {
     const flowNode = nodes.find((node) => node.id === nodeId);
     const task = flowNode?.data.node.replacement_task;
     if (!flowNode || !task) return;
-    const targetImageCount = getUpstreamNodes(nodeId).filter((node) => node.kind === "image" && node.asset_id).length;
-    if (!targetImageCount) {
+    const upstream = getUpstreamNodes(nodeId);
+    const targetAssetIds = upstream
+      .filter((node) => node.kind === "image" && node.asset_id)
+      .map((node) => node.asset_id as string);
+    const sourceGroup = upstream.find((node) => node.kind === "shot_collection");
+    const selectedShots = (sourceGroup?.shot_assets ?? []).filter((shot) => task.selected_shot_indices.includes(shot.index));
+    if (!targetAssetIds.length) {
       updateOperation(nodeId, { status: "failed", error: "请先连接至少一个目标图片节点，再生成逐镜头提示词" });
       return;
     }
-    updateReplacementTask(nodeId, {
-      shot_prompts: task.shot_indices.map((shotIndex) => ({
-        shot_index: shotIndex,
-        prompt: buildShotReplacementPrompt(task, shotIndex, targetImageCount),
-        status: "ready",
-      })),
+    if (!selectedShots.length) {
+      updateOperation(nodeId, { status: "failed", error: "请至少勾选一个需要替换的镜头" });
+      return;
+    }
+    updateOperation(nodeId, { status: "running", error: "", message: "正在按所选镜头生成 Seedance 视频指令…" });
+    try {
+      const result = await buildCanvasReplacementPrompts(projectId, {
+        source_object_name: task.source_object_name,
+        source_object_description: task.source_object_description,
+        target_description: task.target_description,
+        target_asset_ids: targetAssetIds,
+        shots: selectedShots,
+        actions: task.actions,
+      });
+      const promptByShot = new Map(
+        result.prompts
+          .filter((prompt) => prompt.prompt.trim())
+          .map((prompt) => [prompt.shot_index, prompt]),
+      );
+      const missingShotIndices = selectedShots
+        .filter((shot) => !promptByShot.has(shot.index))
+        .map((shot) => String(shot.index).padStart(2, "0"));
+      if (missingShotIndices.length) {
+        throw new Error(`镜头 ${missingShotIndices.join("、")} 的提示词为空，未保存；请重新生成`);
+      }
+      updateReplacementTask(nodeId, {
+        shot_prompts: task.shot_prompts.map((item) => task.selected_shot_indices.includes(item.shot_index)
+          ? promptByShot.get(item.shot_index)!
+          : item),
+      });
+      updateOperation(nodeId, { status: "succeeded", error: "", message: `已生成 ${result.prompts.length} 条可审查的 Seedance 视频指令` });
+    } catch (error) {
+      updateOperation(nodeId, { status: "failed", error: error instanceof Error ? error.message : "逐镜头提示词生成失败" });
+    }
+  }, [getUpstreamNodes, nodes, projectId, updateOperation, updateReplacementTask]);
+
+  const toReplacementResult = useCallback((result: CanvasReplacementResult & { result_asset?: CanvasAsset | null }): CanvasReplacementResult => ({
+    shot_index: result.shot_index,
+    source_asset_id: result.source_asset_id,
+    source_asset_name: result.source_asset_name,
+    duration_seconds: result.duration_seconds,
+    provider_task_id: result.provider_task_id,
+    status: result.status,
+    result_asset_id: result.result_asset?.id ?? result.result_asset_id ?? "",
+    result_asset_url: result.result_asset?.url ?? result.result_asset_url ?? "",
+    result_asset_name: result.result_asset?.filename ?? result.result_asset_name ?? "",
+    error: result.error ?? "",
+  }), []);
+
+  const toShotReplacementVersion = useCallback((
+    taskNodeId: string,
+    task: CanvasReplacementTask,
+    result: CanvasReplacementResult,
+  ): CanvasShotReplacementVersion => ({
+    task_node_id: taskNodeId,
+    source_object_id: task.source_object_id,
+    source_object_name: task.source_object_name,
+    provider_task_id: result.provider_task_id,
+    status: result.status === "original" ? "pending" : result.status,
+    result_asset_id: result.result_asset_id,
+    result_asset_url: result.result_asset_url,
+    result_asset_name: result.result_asset_name,
+    error: result.error,
+  }), []);
+
+  const submitReplacementTasks = useCallback(async (nodeId: string, onlyShotIndex?: number) => {
+    const flowNode = nodes.find((node) => node.id === nodeId);
+    const task = flowNode?.data.node.replacement_task;
+    if (!flowNode || !task) return;
+    const upstream = getUpstreamNodes(nodeId);
+    const targetAssetIds = upstream.filter((node) => node.kind === "image" && node.asset_id).map((node) => node.asset_id as string);
+    const sourceGroup = upstream.find((node) => node.kind === "shot_collection");
+    const selectedShots = (sourceGroup?.shot_assets ?? []).filter((shot) => onlyShotIndex
+      ? shot.index === onlyShotIndex
+      : task.selected_shot_indices.includes(shot.index));
+    const prompts = task.shot_prompts.filter((prompt) => (onlyShotIndex
+      ? prompt.shot_index === onlyShotIndex
+      : task.selected_shot_indices.includes(prompt.shot_index)) && prompt.status === "ready");
+    if (prompts.length !== selectedShots.length) {
+      updateOperation(nodeId, { status: "failed", error: "请先为所有已选镜头生成并审核视频指令" });
+      return;
+    }
+    updateOperation(nodeId, { status: "running", error: "", message: `正在提交 ${selectedShots.length} 个独立镜头视频任务…` });
+    try {
+      const response = await submitCanvasReplacementTasks(projectId, {
+        model: flowNode.data.node.operation?.model || SEEDANCE_MODEL,
+        target_asset_ids: targetAssetIds,
+        shots: selectedShots,
+        prompts,
+        confirmed: true,
+      });
+      const results = response.results.map(toReplacementResult);
+      const resultByShot = new Map(results.map((result) => [result.shot_index, result]));
+      const outputGroupId = task.output_shot_collection_node_id || createCanvasNodeId();
+      const outputGroupNode = task.output_shot_collection_node_id ? null : toFlowNode({
+        id: outputGroupId,
+        kind: "shot_collection",
+        x: flowNode.position.x + 590,
+        y: flowNode.position.y + 12,
+        title: `替换镜头组 · ${task.source_object_name}`,
+        detail: `已提交 ${results.length} 个镜头任务；节点会自动刷新生成结果`,
+        content: "",
+        source_node_id: nodeId,
+        shot_assets: selectedShots.map((shot) => ({
+          ...shot,
+          replacement_versions: [toShotReplacementVersion(nodeId, task, resultByShot.get(shot.index)!)],
+        })),
+        operation: initialOperation("shot_collection"),
+      });
+      const outputEdge = toFlowEdge({
+        id: createEdgeId({ source: nodeId, target: outputGroupId, sourceHandle: "output", targetHandle: "input" }),
+        source: nodeId,
+        target: outputGroupId,
+        sourceHandle: "output",
+        targetHandle: "input",
+      });
+      markDirty();
+      setNodes((current) => {
+        const updated = current.map((node) => {
+          if (node.id === outputGroupId) {
+            return {
+              ...node,
+              data: { node: {
+                ...node.data.node,
+                detail: `已提交 ${results.length} 个镜头任务；正在自动刷新生成结果`,
+                shot_assets: [
+                  ...(node.data.node.shot_assets ?? []).map((shot) => {
+                    const result = resultByShot.get(shot.index);
+                    if (!result) return shot;
+                    const version = toShotReplacementVersion(nodeId, task, result);
+                    return {
+                      ...shot,
+                      replacement_versions: [
+                        ...(shot.replacement_versions ?? []).filter((item) => item.task_node_id !== nodeId),
+                        version,
+                      ],
+                    };
+                  }),
+                  ...selectedShots
+                    .filter((shot) => !(node.data.node.shot_assets ?? []).some((item) => item.index === shot.index))
+                    .map((shot) => ({
+                      ...shot,
+                      replacement_versions: [toShotReplacementVersion(nodeId, task, resultByShot.get(shot.index)!)],
+                    })),
+                ].sort((left, right) => left.index - right.index),
+              } },
+              selected: true,
+            };
+          }
+          if (node.id === nodeId && node.data.node.replacement_task) {
+            return {
+              ...node,
+              data: { node: {
+                ...node.data.node,
+                detail: `已提交 ${results.length} 个独立镜头任务；结果会自动回写到替换镜头组`,
+                replacement_task: {
+                  ...node.data.node.replacement_task,
+                  output_shot_collection_node_id: outputGroupId,
+                  shot_prompts: node.data.node.replacement_task.shot_prompts.map((prompt) => {
+                    const result = resultByShot.get(prompt.shot_index);
+                    return result ? {
+                      ...prompt,
+                      status: replacementPromptStatus(result.status),
+                      provider_task_id: result.provider_task_id,
+                      result_asset_id: result.result_asset_id,
+                      error: result.error,
+                    } : prompt;
+                  }),
+                },
+                operation: { ...(node.data.node.operation ?? initialOperation("replacement_task")), status: "succeeded" as const, error: "", message: `已提交 ${results.length} 个独立镜头任务，正在自动刷新结果` },
+              } },
+              selected: false,
+            };
+          }
+          return { ...node, selected: false };
+        });
+        return outputGroupNode ? [...updated, { ...outputGroupNode, selected: true }] : updated;
+      });
+      setEdges((current) => current.some((edge) => edge.id === outputEdge.id) ? current : [...current, outputEdge]);
+      window.requestAnimationFrame(() => {
+        void flowInstance?.fitView({ nodes: [{ id: outputGroupId }], padding: 0.5, duration: 220 });
+      });
+    } catch (error) {
+      updateOperation(nodeId, { status: "failed", error: error instanceof Error ? error.message : "逐镜头视频替换提交失败" });
+    }
+  }, [flowInstance, getUpstreamNodes, nodes, projectId, setEdges, setNodes, toReplacementResult, toShotReplacementVersion, updateOperation]);
+
+  const refreshReplacementTasks = useCallback(async (nodeId: string) => {
+    const flowNode = nodes.find((node) => node.id === nodeId);
+    const task = flowNode?.data.node.replacement_task;
+    if (!flowNode || !task) return;
+    const sourceGroup = getUpstreamNodes(nodeId).find((node) => node.kind === "shot_collection");
+    const shotsByIndex = new Map((sourceGroup?.shot_assets ?? []).map((shot) => [shot.index, shot]));
+    const refreshable = task.shot_prompts.filter((prompt) => prompt.provider_task_id && (prompt.status === "queued" || prompt.status === "running"));
+    if (!refreshable.length) return;
+    updateOperation(nodeId, { status: "running", error: "", message: `正在刷新 ${refreshable.length} 个视频任务…` });
+    const settled = await Promise.allSettled(refreshable.map(async (prompt) => {
+      const shot = shotsByIndex.get(prompt.shot_index);
+      if (!shot) throw new Error(`镜头 ${String(prompt.shot_index).padStart(2, "0")} 不存在`);
+      const response = await refreshCanvasReplacementTask(projectId, {
+        provider_task_id: prompt.provider_task_id ?? "",
+        shot,
+        result_asset_id: prompt.result_asset_id,
+      });
+      return toReplacementResult(response.result);
+    }));
+    const updates = new Map<number, CanvasReplacementResult>();
+    const errors = new Map<number, string>();
+    settled.forEach((item, index) => {
+      const prompt = refreshable[index];
+      if (item.status === "fulfilled") updates.set(item.value.shot_index, item.value);
+      else errors.set(prompt.shot_index, item.reason instanceof Error ? item.reason.message : "任务刷新失败");
     });
-    updateOperation(nodeId, {
-      status: "succeeded",
-      error: "",
-      message: `已生成 ${task.shot_indices.length} 条可审查的逐镜头替换提示词`,
+    markDirty();
+    setNodes((current) => current.map((node) => {
+      if (node.id === nodeId && node.data.node.replacement_task) {
+        return {
+          ...node,
+          data: { node: {
+            ...node.data.node,
+            replacement_task: {
+              ...node.data.node.replacement_task,
+              shot_prompts: node.data.node.replacement_task.shot_prompts.map((prompt) => {
+                const result = updates.get(prompt.shot_index);
+                if (result) return { ...prompt, status: replacementPromptStatus(result.status), provider_task_id: result.provider_task_id, result_asset_id: result.result_asset_id, error: result.error };
+                return errors.has(prompt.shot_index) ? { ...prompt, status: "failed", error: errors.get(prompt.shot_index) } : prompt;
+              }),
+            },
+            operation: { ...(node.data.node.operation ?? initialOperation("replacement_task")), status: "succeeded" as const, error: "", message: `已刷新 ${refreshable.length} 个视频任务` },
+          } },
+        };
+      }
+      if (node.id === task.output_shot_collection_node_id) {
+        return {
+          ...node,
+          data: { node: {
+            ...node.data.node,
+            detail: `已刷新 ${refreshable.length} 个任务；生成结果会保存在对应镜头卡片`,
+            shot_assets: (node.data.node.shot_assets ?? []).map((shot) => {
+              const result = updates.get(shot.index);
+              const existingVersions = shot.replacement_versions ?? [];
+              if (result) {
+                const version = toShotReplacementVersion(nodeId, task, result);
+                return {
+                  ...shot,
+                  replacement_versions: [
+                    ...existingVersions.filter((item) => item.task_node_id !== nodeId),
+                    version,
+                  ],
+                };
+              }
+              if (errors.has(shot.index)) {
+                return {
+                  ...shot,
+                  replacement_versions: existingVersions.map((item) => item.task_node_id === nodeId
+                    ? { ...item, status: "failed" as const, error: errors.get(shot.index) }
+                    : item),
+                };
+              }
+              return shot;
+            }),
+          } },
+        };
+      }
+      return node;
+    }));
+  }, [getUpstreamNodes, nodes, projectId, setNodes, toReplacementResult, toShotReplacementVersion, updateOperation]);
+
+  const activeReplacementTaskIds = useMemo(() => nodes
+    .filter((node) => node.data.node.kind === "replacement_task" && node.data.node.replacement_task?.shot_prompts.some((prompt) => (
+      prompt.provider_task_id && (prompt.status === "queued" || prompt.status === "running")
+    )))
+    .map((node) => node.id), [nodes]);
+
+  useEffect(() => {
+    if (!activeReplacementTaskIds.length) return;
+    replacementPollingTimer.current = window.setTimeout(() => {
+      activeReplacementTaskIds.forEach((nodeId) => void refreshReplacementTasks(nodeId));
+    }, 5000);
+    return () => {
+      if (replacementPollingTimer.current !== null) {
+        window.clearTimeout(replacementPollingTimer.current);
+        replacementPollingTimer.current = null;
+      }
+    };
+  }, [activeReplacementTaskIds, refreshReplacementTasks]);
+
+  const composeReplacementTask = useCallback(async (nodeId: string) => {
+    const taskNode = nodes.find((node) => node.id === nodeId);
+    const task = taskNode?.data.node.replacement_task;
+    const sourceShotGroup = nodes.find((node) => node.id === task?.shot_collection_node_id);
+    const outputShotGroup = nodes.find((node) => node.id === task?.output_shot_collection_node_id);
+    const sourceVideo = nodes.find((node) => node.id === sourceShotGroup?.data.node.source_node_id);
+    const extractedAudio = nodes.find((node) => node.data.node.kind === "audio"
+      && node.data.node.source_extractor_id === sourceVideo?.data.node.source_extractor_id
+      && node.data.node.asset_id);
+    const shots = sourceShotGroup?.data.node.shot_assets ?? [];
+    const results = (outputShotGroup?.data.node.shot_assets ?? []).flatMap((shot): CanvasReplacementResult[] => {
+      const version = shot.replacement_versions?.find((item) => item.task_node_id === nodeId);
+      return version ? [{
+        shot_index: shot.index,
+        source_asset_id: shot.asset_id,
+        source_asset_name: shot.asset_name,
+        duration_seconds: shot.duration_seconds,
+        provider_task_id: version.provider_task_id,
+        status: version.status,
+        result_asset_id: version.result_asset_id,
+        result_asset_url: version.result_asset_url,
+        result_asset_name: version.result_asset_name,
+        error: version.error,
+      }] : [];
     });
-  }, [getUpstreamNodes, nodes, updateOperation, updateReplacementTask]);
+    const sourceAudioAssetId = extractedAudio?.data.node.asset_id ?? sourceVideo?.data.node.asset_id;
+    if (!taskNode || !shots.length || !results.length || !sourceAudioAssetId) {
+      updateOperation(nodeId, { status: "failed", error: "缺少原视频、分镜组或替换结果，暂时不能合成" });
+      return;
+    }
+    updateOperation(nodeId, { status: "running", error: "", message: "正在按原镜头顺序合成，并附回原视频音频…" });
+    try {
+      const response = await composeCanvasReplacementResults(projectId, {
+        shots,
+        results,
+        source_audio_asset_id: sourceAudioAssetId,
+      });
+      const outputNode = toFlowNode({
+        id: createCanvasNodeId(),
+        kind: "video",
+        x: taskNode.position.x + 560,
+        y: taskNode.position.y + 32,
+        title: "逐镜头替换成片",
+        detail: response.used_original_shot_indices.length
+          ? `已合成；镜头 ${response.used_original_shot_indices.map((index) => String(index).padStart(2, "0")).join("、")} 保留原画面`
+          : "已合成全部替换镜头，并附回原视频音频",
+        content: "",
+        asset_id: response.asset.id,
+        asset_url: response.asset.url,
+        asset_name: response.asset.filename,
+        source_node_id: nodeId,
+        operation: initialOperation("video"),
+      });
+      const outputEdge = toFlowEdge({
+        id: createEdgeId({ source: nodeId, target: outputNode.id, sourceHandle: "output", targetHandle: "input" }),
+        source: nodeId,
+        target: outputNode.id,
+        sourceHandle: "output",
+        targetHandle: "input",
+      });
+      markDirty();
+      setNodes((current) => [
+        ...current.map((node) => node.id === nodeId ? {
+          ...node,
+          data: { node: {
+            ...node.data.node,
+            detail: `已合成替换成片${response.used_original_shot_indices.length ? "，失败或未选镜头保留原画面" : ""}`,
+            operation: { ...(node.data.node.operation ?? initialOperation("replacement_task")), status: "succeeded" as const, error: "", message: "成片已生成并保存在当前画布素材目录" },
+          } },
+        } : node),
+        { ...outputNode, selected: true },
+      ]);
+      setEdges((current) => [...current, outputEdge]);
+    } catch (error) {
+      updateOperation(nodeId, { status: "failed", error: error instanceof Error ? error.message : "逐镜头替换成片合成失败" });
+    }
+  }, [nodes, projectId, setEdges, setNodes, updateOperation]);
+
+  const addTargetImageNode = useCallback((replacementTaskNodeId: string) => {
+    const taskNode = nodes.find((node) => node.id === replacementTaskNodeId);
+    if (!taskNode || taskNode.data.node.kind !== "replacement_task") return;
+    const targetLabel = replaceableKindLabel(taskNode.data.node.replacement_task?.source_object_kind ?? "product");
+    const imageNode = toFlowNode({
+      id: createCanvasNodeId(),
+      kind: "image",
+      x: taskNode.position.x - 360,
+      y: taskNode.position.y + 100,
+      title: `目标${targetLabel}图片`,
+      detail: "上传目标参考图，或输入提示词生成目标素材",
+      content: "",
+      operation: initialOperation("image"),
+    });
+    const edge = toFlowEdge({
+      id: createEdgeId({ source: imageNode.id, target: replacementTaskNodeId, sourceHandle: "output", targetHandle: "input" }),
+      source: imageNode.id,
+      target: replacementTaskNodeId,
+      sourceHandle: "output",
+      targetHandle: "input",
+    });
+    markDirty();
+    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), { ...imageNode, selected: true }]);
+    setEdges((current) => [...current, edge]);
+  }, [nodes, setEdges, setNodes]);
 
   const nodeActions = useMemo(() => ({
     updateText,
@@ -877,13 +1278,19 @@ export function CanvasWorkspace({ projectId, document, onDocumentChange, onUploa
     replacementAnalysisNodeId,
     createReplacementTask,
     updateReplacementTask,
+    toggleReplacementShot,
     updateReplacementShotPrompt,
     buildReplacementPrompts,
+    submitReplacementTasks,
+    refreshReplacementTasks,
+    composeReplacementTask,
+    addTargetImageNode,
     runNode,
     runExtractor,
     getUpstreamNodes,
+    getCanvasNode,
     previewMedia: setPreviewNode,
-  }), [analyzeReplaceables, buildReplacementPrompts, createReplacementTask, extractVideoKeyframes, getUpstreamNodes, replacementAnalysisNodeId, runExtractor, runNode, saveNodeInstruction, splitVideoByShots, updateOperation, updateReplacementShotPrompt, updateReplacementTask, updateText, uploadNodeAsset, uploadReferenceAsset, uploadingNodeId, videoAction]);
+  }), [addTargetImageNode, analyzeReplaceables, buildReplacementPrompts, composeReplacementTask, createReplacementTask, extractVideoKeyframes, getCanvasNode, getUpstreamNodes, refreshReplacementTasks, replacementAnalysisNodeId, runExtractor, runNode, saveNodeInstruction, splitVideoByShots, submitReplacementTasks, toggleReplacementShot, updateOperation, updateReplacementShotPrompt, updateReplacementTask, updateText, uploadNodeAsset, uploadReferenceAsset, uploadingNodeId, videoAction]);
 
   const nextNodePosition = useCallback(() => {
     const element = canvasElement.current;
