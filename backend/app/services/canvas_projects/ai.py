@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
+import logging
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -13,6 +14,9 @@ import httpx
 from backend.app.services.siliconflow import SiliconFlowClient, SiliconFlowError
 
 from .service import CanvasAssetNotFoundError, CanvasProjectService
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class CanvasAIError(RuntimeError):
@@ -83,6 +87,19 @@ class CanvasAIService:
         }
         if references:
             provider_payload["image"] = references
+        logger.info(
+            "canvas.seedream.submit project_id=%s model=%s prompt=%r size=%s "
+            "source_url=%r source_asset_ids=%s reference_count=%d response_format=%s watermark=%s",
+            project_id,
+            self.config.image_model,
+            prompt,
+            provider_payload["size"],
+            source_url,
+            source_asset_ids,
+            len(references),
+            provider_payload["response_format"],
+            provider_payload["watermark"],
+        )
         try:
             async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
                 response = await client.post(

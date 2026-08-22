@@ -1,16 +1,16 @@
 import {
   CheckCircle2,
   Image as ImageIcon,
-  Layers3,
   Link2,
   LoaderCircle,
   PencilLine,
   Plus,
   Send,
+  Trash2,
   WandSparkles,
 } from "lucide-react";
 import type { NodeProps } from "@xyflow/react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { useCanvasNodeActions } from "./CanvasNodeActions";
 import { CanvasNodeShell } from "./CanvasNodeShell";
@@ -36,16 +36,15 @@ function promptStatus(status: string) {
 export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
   const {
     buildReplacementPrompts,
-    composeReplacementTask,
     addTargetImageNode,
     getCanvasNode,
-    getUpstreamNodes,
     previewMedia,
     submitReplacementTasks,
     toggleReplacementShot,
     updateOperation,
     updateReplacementShotPrompt,
     updateReplacementTask,
+    videoModels,
   } = useCanvasNodeActions();
   const { node } = data;
   const task = node.replacement_task;
@@ -53,14 +52,24 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
   const [showAllShots, setShowAllShots] = useState(false);
   const [editingShotIndex, setEditingShotIndex] = useState<number | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const upstream = getUpstreamNodes(id);
-  const targetImages = useMemo(() => upstream
-    .filter((upstreamNode) => upstreamNode.kind === "image" && upstreamNode.asset_id && upstreamNode.asset_url), [upstream]);
-  const sourceGroup = upstream.find((upstreamNode) => upstreamNode.kind === "shot_collection");
+  const sourceGroup = getCanvasNode(task?.shot_collection_node_id);
   const outputGroup = getCanvasNode(task?.output_shot_collection_node_id);
   const selectedShotIds = new Set(task?.selected_shot_indices ?? []);
 
   if (!task) return null;
+  const subjectBindings = task.subjects.map((subject, subjectIndex) => ({
+    subject,
+    subjectIndex,
+    targetImage: getCanvasNode(subject.target_node_id),
+  }));
+  const visibleSubjectBindings = subjectBindings;
+  const allSubjectsReady = subjectBindings.length > 0 && subjectBindings.every(({ targetImage }) => (
+    targetImage?.kind === "image" && targetImage.asset_id && targetImage.asset_url
+  ));
+  const unreadySubjectBindings = subjectBindings.filter(({ targetImage }) => (
+    targetImage?.kind !== "image" || !targetImage.asset_id || !targetImage.asset_url
+  ));
+  const taskName = task.subjects.map((subject) => subject.source_object_name).join(" + ");
   const allShots = sourceGroup?.shot_assets?.filter((shot) => task.shot_indices.includes(shot.index)) ?? [];
   const visibleShots = showAllShots ? allShots : allShots.slice(0, SHOT_PREVIEW_LIMIT);
   const selectedPrompts = task.shot_prompts.filter((item) => selectedShotIds.has(item.shot_index));
@@ -76,16 +85,43 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
   )).length;
   const activeCount = generatedVersions.filter((version) => version.status === "queued" || version.status === "running").length;
   const completedCount = generatedVersions.filter((version) => version.status === "succeeded").length;
-  const canCompose = generatedVersions.length > 0
-    && generatedVersions.every((version) => version.status === "succeeded" || version.status === "failed");
   const isBusy = node.operation?.status === "running";
   const requiresPromptRebuild = selectedPrompts.some((item) => item.input_revision !== 3);
+  const availableModels = videoModels.filter((model) => model.capabilities.includes("subject_replace"));
+  const selectedModel = node.operation?.model || availableModels[0]?.id || "";
+  const selectedModelIsAvailable = availableModels.some((model) => model.id === selectedModel);
+
+  const removeSubjects = (sourceObjectIds: Set<string>) => {
+    const subjects = task.subjects.filter((subject) => !sourceObjectIds.has(subject.source_object_id));
+    if (!subjects.length) return;
+    const shotIndices = [...new Set(subjects.flatMap((subject) => subject.shot_indices))].sort((left, right) => left - right);
+    const primarySubject = subjects[0];
+    updateReplacementTask(id, {
+      source_object_id: primarySubject.source_object_id,
+      source_object_kind: primarySubject.source_object_kind,
+      source_object_name: primarySubject.source_object_name,
+      source_object_description: primarySubject.source_object_description,
+      target_description: primarySubject.target_description,
+      subjects,
+      shot_indices: shotIndices,
+      actions: primarySubject.actions,
+      selected_shot_indices: task.selected_shot_indices.filter((shotIndex) => shotIndices.includes(shotIndex)),
+      // Removing a subject changes every affected edit instruction. Rebuild them
+      // instead of allowing a stale prompt to be submitted.
+      shot_prompts: task.shot_prompts.map((item) => ({
+        shot_index: item.shot_index,
+        prompt: "",
+        input_revision: 0,
+        status: "pending" as const,
+      })),
+    });
+  };
 
   return (
     <CanvasNodeShell node={node} selected={selected} label="视频主体替换" icon={<WandSparkles />}>
       <section className="canvas-replacement-task nodrag nowheel">
         <header className="canvas-replacement-task__summary">
-          <div><span>{kindLabel(task.source_object_kind)}主体替换</span><strong>{task.source_object_name}</strong></div>
+          <div><span>{task.subjects.length > 1 ? "多主体一次替换" : `${kindLabel(task.source_object_kind)}主体替换`}</span><strong>{taskName}</strong></div>
           <p>已选 {task.selected_shot_indices.length}/{task.shot_indices.length} 个连续片段</p>
         </header>
 
@@ -120,46 +156,81 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
           <p>每一项都是独立的完整视频编辑任务；勾选多个片段仅是批量提交，不会把多个片段一起送给模型。</p>
         </section>
 
-        <div className="canvas-replacement-task__materials">
-          <span><Link2 /> 目标素材</span>
-          {targetImages.length ? <div>
-            {targetImages.map((image) => <button key={image.id} type="button" title={`预览：${image.asset_name || image.title}`} onClick={() => previewMedia(image)}>
-              <img src={image.asset_url} alt={image.asset_name || image.title} />
-            </button>)}
-          </div> : <div className="canvas-replacement-task__empty-material">
-            <p>还没有目标素材</p>
-            <button type="button" onClick={() => addTargetImageNode(id)}><Plus /> 添加目标图片</button>
-          </div>}
-        </div>
-
-        <label className="canvas-replacement-task__target-description">
-          <span>目标{kindLabel(task.source_object_kind)}说明</span>
-          <input
-            className="nodrag nowheel"
-            value={task.target_description}
-            placeholder="描述外观、颜色、材质、结构；商品图仍是最高依据"
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerMove={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-            onChange={(event) => updateReplacementTask(id, { target_description: event.target.value })}
-          />
-        </label>
+        <section className="canvas-replacement-task__bindings">
+          <header>
+            <strong><Link2 /> 主体与目标图一对一绑定</strong>
+            <div className="canvas-replacement-task__binding-status">
+              <span>{subjectBindings.filter(({ targetImage }) => targetImage?.asset_id && targetImage.asset_url).length}/{subjectBindings.length} 已就绪</span>
+              {unreadySubjectBindings.length ? <button
+                type="button"
+                className="canvas-replacement-task__remove-unready"
+                onClick={() => removeSubjects(new Set(unreadySubjectBindings.map(({ subject }) => subject.source_object_id)))}
+              ><Trash2 /> 移除未就绪主体（{unreadySubjectBindings.length}）</button> : null}
+            </div>
+          </header>
+          {visibleSubjectBindings.map(({ subject, subjectIndex, targetImage }) => <article key={subject.source_object_id} className={`canvas-replacement-task__binding ${targetImage?.asset_id ? "is-ready" : ""}`}>
+            <div className="canvas-replacement-task__binding-source">
+              <small>源主体 {subjectIndex + 1}</small>
+              <strong>{subject.source_object_name}</strong>
+              <span>{kindLabel(subject.source_object_kind)}</span>
+              {task.subjects.length > 1 ? <button
+                type="button"
+                className="canvas-replacement-task__remove-subject"
+                onClick={() => removeSubjects(new Set([subject.source_object_id]))}
+              ><Trash2 /> 移除主体</button> : null}
+            </div>
+            <span className="canvas-replacement-task__binding-arrow">替换为</span>
+            <div className="canvas-replacement-task__binding-target">
+              {targetImage?.asset_id && targetImage.asset_url ? <button type="button" title={`预览：${targetImage.asset_name || targetImage.title}`} onClick={() => previewMedia(targetImage)}>
+                <img src={targetImage.asset_url} alt={targetImage.asset_name || targetImage.title} />
+              </button> : <ImageIcon />}
+              <div>
+                <strong>{targetImage?.asset_name || `目标${kindLabel(subject.source_object_kind)}图片`}</strong>
+                <button type="button" onClick={() => addTargetImageNode(id, subject.source_object_id)}>
+                  {targetImage?.asset_id ? "查看图片节点" : targetImage ? "上传或生成图片" : <><Plus /> 创建图片节点</>}
+                </button>
+              </div>
+            </div>
+            <label>
+              <span>目标说明（选填）</span>
+              <input
+                className="nodrag nowheel"
+                value={subject.target_description}
+                placeholder="描述该目标的外观、颜色、材质与结构"
+                onPointerDown={(event) => event.stopPropagation()}
+                onPointerMove={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  const subjects = task.subjects.map((item) => item.source_object_id === subject.source_object_id
+                    ? { ...item, target_description: event.target.value }
+                    : item);
+                  updateReplacementTask(id, {
+                    subjects,
+                    target_description: subjects[0]?.target_description ?? "",
+                  });
+                }}
+              />
+            </label>
+          </article>)}
+          {!visibleSubjectBindings.length ? <p>还没有可替换主体。</p> : null}
+          <p>每个源主体只使用右侧绑定的目标图；多个主体会在同一个视频任务中一次完成替换。</p>
+        </section>
 
         <div className="canvas-replacement-task__submit-row">
           <label title="视频主体替换使用视频编辑模型">
             <span>视频模型</span>
-            <select value={node.operation?.model || "doubao-seedance-2-0-mini-260615"} onChange={(event) => updateOperation(id, { model: event.target.value, status: "idle", error: "" })}>
-              <option value="doubao-seedance-2-0-mini-260615">Seedance 2.0 Mini</option>
-              <option value="doubao-seedance-2-0-260128">Seedance 2.0</option>
-              <option value="doubao-seedance-2-0-fast-260128">Seedance 2.0 Fast</option>
+            <select disabled={!availableModels.length} value={selectedModel} onChange={(event) => updateOperation(id, { model: event.target.value, status: "idle", error: "" })}>
+              {selectedModel && !selectedModelIsAvailable ? <option value={selectedModel}>{selectedModel}</option> : null}
+              {availableModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+              {!availableModels.length ? <option value="">没有可用模型</option> : null}
             </select>
           </label>
-          <button className="canvas-replacement-task__build" type="button" disabled={!targetImages.length || !task.selected_shot_indices.length || isBusy} onClick={() => void buildReplacementPrompts(id)}>
+          <button className="canvas-replacement-task__build" type="button" disabled={!allSubjectsReady || !task.selected_shot_indices.length || isBusy} onClick={() => void buildReplacementPrompts(id)}>
             {isBusy ? <LoaderCircle className="spin" /> : <WandSparkles />} 生成视频编辑指令
           </button>
         </div>
-        {!targetImages.length ? <p className="canvas-replacement-task__hint"><ImageIcon /> 添加图片会创建独立图片节点；你也可以连接已有目标素材。</p> : null}
-        <p className="canvas-replacement-task__hint">每个连续编辑片段会作为一条完整视频编辑任务提交：原视频片段 + 目标素材图。</p>
+        {!allSubjectsReady ? <p className="canvas-replacement-task__hint"><ImageIcon /> 请先为每个主体上传一张对应目标图，缺少任意一张都不会提交。</p> : null}
+        <p className="canvas-replacement-task__hint">每个连续片段只提交一个完整视频任务：原视频片段 + 全部已绑定目标图，在一次生成中同时替换。</p>
 
         <div className="canvas-replacement-task__prompts">
           <header><strong>逐片段视频编辑指令</strong><span>{readyCount} 条待提交 · {activeCount} 条生成中 · {completedCount} 条完成</span></header>
@@ -167,7 +238,13 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
           {requiresPromptRebuild ? <p className="canvas-replacement-task__error">此任务使用的是旧生成结构。请先点击“生成视频编辑指令”后再提交。</p> : null}
           {prompts.map((item) => {
             const outputVersion = outputVersionByShot.get(item.shot_index);
-            const canSubmit = item.status === "ready" && (!outputVersion || outputVersion.status === "failed" || editingShotIndex === item.shot_index);
+            const outputIsActive = outputVersion?.status === "pending"
+              || outputVersion?.status === "queued"
+              || outputVersion?.status === "running";
+            const canSubmit = Boolean(item.prompt.trim())
+              && item.input_revision === 3
+              && !outputIsActive
+              && (item.status === "ready" || outputVersion?.status === "failed" || outputVersion?.status === "succeeded");
             return <article key={item.shot_index} className={`canvas-replacement-task__prompt ${editingShotIndex === item.shot_index ? "is-editing" : ""}`}>
               <header>
                 <span>片段 {String(item.shot_index).padStart(2, "0")}</span>
@@ -193,12 +270,12 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
               </header>
               {editingShotIndex === item.shot_index ? <div className="canvas-replacement-task__prompt-editor">
                 <label>
-                  <span>Seedance 视频提示词</span>
+                  <span>视频编辑提示词</span>
                   <textarea
                     className="nodrag nowheel"
                     rows={9}
                     value={item.prompt}
-                    placeholder="生成后可审核并修改此镜头的 Seedance 视频指令…"
+                    placeholder="生成后可审核并修改此镜头的视频编辑指令…"
                     onPointerDown={(event) => event.stopPropagation()}
                     onPointerMove={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
@@ -233,9 +310,6 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
           <button type="button" className="canvas-replacement-task__generate" disabled={!confirmed || !readyCount || isBusy} onClick={() => void submitReplacementTasks(id)}>
             <Send /> 提交 {readyCount} 个完整视频编辑任务
           </button>
-          {canCompose ? <button type="button" className="canvas-replacement-task__refresh" disabled={isBusy} title="按分镜原顺序合成，未替换镜头保留原画面，并附回原声音频" onClick={() => void composeReplacementTask(id)}>
-            <Layers3 /> 合成成片
-          </button> : null}
         </div>
         {node.operation?.error ? <p className="canvas-replacement-task__error" role="alert">{node.operation.error}</p> : null}
         {node.operation?.status === "succeeded" && node.operation.message ? <p className="canvas-replacement-task__success"><CheckCircle2 /> {node.operation.message}</p> : null}

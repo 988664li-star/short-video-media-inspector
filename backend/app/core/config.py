@@ -137,6 +137,14 @@ class Settings:
     seedance_object_storage_presign_seconds: int = int(
         os.environ.get("SEEDANCE_OBJECT_STORAGE_PRESIGN_SECONDS", "3600")
     )
+    seedance_log_presigned_urls: bool = os.environ.get(
+        "SEEDANCE_LOG_PRESIGNED_URLS", "false"
+    ).lower() in {"1", "true", "yes", "on"}
+    xiaoyunque_api_key: str = os.environ.get("XIAOYUNQUE_API_KEY", "")
+    xiaoyunque_api_base_url: str = os.environ.get(
+        "XIAOYUNQUE_API_BASE_URL",
+        "https://xyq.jianying.com/api/biz/v1",
+    )
     replica_primary_overlap_seconds: float = float(
         os.environ.get("REPLICA_PRIMARY_OVERLAP_SECONDS", "0.3")
     )

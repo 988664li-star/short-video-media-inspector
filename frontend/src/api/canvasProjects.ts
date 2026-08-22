@@ -8,10 +8,28 @@ import type {
   CanvasReplaceableObject,
   CanvasReplacementResult,
   CanvasReplacementShotPrompt,
+  CanvasReplacementSubject,
   CanvasShotAsset,
   CanvasVideoKeyframeResult,
+  CanvasVideoModel,
   CanvasVideoShotResult,
 } from "../types/canvas";
+
+let videoModelsRequest: Promise<{ models: CanvasVideoModel[] }> | null = null;
+
+export function listCanvasVideoModels() {
+  if (!videoModelsRequest) {
+    videoModelsRequest = apiRequest<{ models: CanvasVideoModel[] }>(
+      "/api/canvas/video-models",
+      {},
+      "读取视频模型列表失败",
+    ).catch((error) => {
+      videoModelsRequest = null;
+      throw error;
+    });
+  }
+  return videoModelsRequest;
+}
 
 export function listCanvasProjects() {
   return apiRequest<{ projects: CanvasProjectSummary[] }>(
@@ -136,6 +154,28 @@ export function extractCanvasVideoKeyframes(projectId: string, assetId: string) 
   );
 }
 
+export function composeCanvasVideoComparison(
+  projectId: string,
+  videoAssetIds: string[],
+  audioAssetId = "",
+) {
+  return apiRequest<{
+    asset: CanvasAsset;
+    input_count: number;
+    audio_source_asset_id: string;
+  }>(
+    `/api/canvas/projects/${projectId}/video-comparisons`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        video_asset_ids: videoAssetIds,
+        audio_asset_id: audioAssetId,
+      }),
+    },
+    "对比视频生成失败",
+  );
+}
+
 export interface CanvasReplacementAnalysisResult {
   keyframes: Array<{
     shot_index: number;
@@ -144,10 +184,14 @@ export interface CanvasReplacementAnalysisResult {
   objects: CanvasReplaceableObject[];
 }
 
-export function analyzeCanvasReplaceables(projectId: string, shots: CanvasShotAsset[]) {
+export function analyzeCanvasReplaceables(
+  projectId: string,
+  shots: CanvasShotAsset[],
+  sourceContext: string,
+) {
   return apiRequest<CanvasReplacementAnalysisResult>(
     `/api/canvas/projects/${projectId}/replacement-analysis`,
-    { method: "POST", body: JSON.stringify({ shots }) },
+    { method: "POST", body: JSON.stringify({ shots, source_context: sourceContext }) },
     "可替换对象识别失败",
   );
 }
@@ -161,6 +205,7 @@ export function buildCanvasReplacementPrompts(
     target_asset_ids: string[];
     shots: CanvasShotAsset[];
     actions: Array<{ shot_index: number; description: string }>;
+    subjects: Array<Omit<CanvasReplacementSubject, "target_node_id"> & { target_asset_ids: string[] }>;
   },
 ) {
   return apiRequest<{ prompts: CanvasReplacementShotPrompt[] }>(
@@ -173,6 +218,8 @@ export function buildCanvasReplacementPrompts(
 export function submitCanvasReplacementTasks(
   projectId: string,
   payload: {
+    task_node_id: string;
+    output_shot_collection_node_id: string;
     model: string;
     target_asset_ids: string[];
     shots: CanvasShotAsset[];
@@ -180,7 +227,10 @@ export function submitCanvasReplacementTasks(
     confirmed: boolean;
   },
 ) {
-  return apiRequest<{ results: Array<CanvasReplacementResult & { result_asset?: CanvasAsset | null }> }>(
+  return apiRequest<{
+    output_shot_collection_node_id: string;
+    results: Array<CanvasReplacementResult & { result_asset?: CanvasAsset | null }>;
+  }>(
     `/api/canvas/projects/${projectId}/replacement-tasks`,
     { method: "POST", body: JSON.stringify(payload) },
     "逐镜头视频替换提交失败",
@@ -189,7 +239,14 @@ export function submitCanvasReplacementTasks(
 
 export function refreshCanvasReplacementTask(
   projectId: string,
-  payload: { provider_task_id: string; shot: CanvasShotAsset; result_asset_id?: string },
+  payload: {
+    model: string;
+    provider_task_id: string;
+    task_node_id: string;
+    output_shot_collection_node_id: string;
+    shot: CanvasShotAsset;
+    result_asset_id?: string;
+  },
 ) {
   return apiRequest<{ result: CanvasReplacementResult & { result_asset?: CanvasAsset | null } }>(
     `/api/canvas/projects/${projectId}/replacement-tasks/refresh`,
@@ -203,7 +260,7 @@ export function composeCanvasReplacementResults(
   payload: {
     shots: CanvasShotAsset[];
     results: CanvasReplacementResult[];
-    source_audio_asset_id: string;
+    source_audio_asset_id?: string;
   },
 ) {
   return apiRequest<{ asset: CanvasAsset; used_original_shot_indices: number[] }>(

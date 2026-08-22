@@ -1,28 +1,36 @@
-"""Independent, per-shot Seedance replacement tasks for the creative canvas."""
+"""Provider-neutral, per-shot replacement orchestration for the creative canvas."""
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import logging
 import math
 from pathlib import Path
+import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import av
 import httpx
 
-from backend.app.services.seedance.object_storage import ObjectStorageError, SeedanceObjectStorage
-
-from .generation import MAX_SEEDANCE_VIDEO_SECONDS, MIN_SEEDANCE_VIDEO_SECONDS
+from backend.app.services.video_generation import (
+    VideoAssetPublisher,
+    VideoAssetPublisherError,
+    VideoEditRequest,
+    VideoGenerationProvider,
+    VideoGenerationProviderError,
+    VideoGenerationRegistry,
+    VideoModelProfile,
+    VideoProviderContext,
+)
 from .prompts import CanvasPromptTemplateError, CanvasPromptTemplates
 from .service import CanvasAssetNotFoundError, CanvasProjectService
 
 
-SEEDANCE_MODELS = {
-    "doubao-seedance-2-0-mini-260615",
-    "doubao-seedance-2-0-260128",
-    "doubao-seedance-2-0-fast-260128",
-}
+logger = logging.getLogger("uvicorn.error")
+
+
 MAX_CONCURRENT_SUBMISSIONS = 3
 
 
@@ -32,8 +40,6 @@ class CanvasReplacementTaskError(RuntimeError):
 
 @dataclass(frozen=True)
 class CanvasReplacementVideoConfig:
-    api_key: str
-    api_url: str
     max_asset_bytes: int
 
 
@@ -41,21 +47,26 @@ class CanvasReplacementTaskService:
     """Render, submit and refresh explicit per-shot video replacement tasks.
 
     This service is intentionally independent from the older continuous-segment
-    Seedance workspace. A canvas task always has one contiguous source video
-    edit segment and one or more target reference images.
+    provider-specific workspace. A canvas task always has one contiguous source
+    video edit segment and one or more target reference images.
     """
 
     def __init__(
         self,
         project_service: CanvasProjectService,
-        object_storage: SeedanceObjectStorage,
+        object_storage: VideoAssetPublisher,
         config: CanvasReplacementVideoConfig,
         prompt_templates: CanvasPromptTemplates | None = None,
+        provider_registry: VideoGenerationRegistry | None = None,
     ) -> None:
         self.project_service = project_service
         self.object_storage = object_storage
         self.config = config
         self.prompt_templates = prompt_templates
+        self.provider_registry = provider_registry or VideoGenerationRegistry([])
+
+    def available_models(self) -> list[dict[str, object]]:
+        return self.provider_registry.catalog("subject_replace")
 
     def build_prompts(
         self,
@@ -66,6 +77,7 @@ class CanvasReplacementTaskService:
         target_asset_ids: list[str],
         shots: list[dict[str, Any]],
         actions: list[dict[str, Any]],
+        subjects: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         if not target_asset_ids:
             raise CanvasReplacementTaskError("请先连接至少一张目标对象参考图")
@@ -79,22 +91,84 @@ class CanvasReplacementTaskService:
             if isinstance(item, dict) and isinstance(item.get("shot_index"), int)
         }
         image_references = self._image_references(len(target_asset_ids))
+        prompt_subjects = subjects or []
+        subject_references: list[tuple[dict[str, Any], str]] = []
+        if prompt_subjects:
+            next_image_index = 1
+            ordered_subject_asset_ids: list[str] = []
+            for subject in prompt_subjects:
+                subject_asset_ids = list(subject.get("target_asset_ids") or [])
+                if not subject_asset_ids:
+                    raise CanvasReplacementTaskError(
+                        f"替换主体“{subject.get('source_object_name') or '未命名主体'}”缺少目标参考图"
+                    )
+                subject_references.append((
+                    subject,
+                    self._image_reference_range(next_image_index, len(subject_asset_ids)),
+                ))
+                ordered_subject_asset_ids.extend(subject_asset_ids)
+                next_image_index += len(subject_asset_ids)
+            if ordered_subject_asset_ids != target_asset_ids:
+                raise CanvasReplacementTaskError(
+                    "主体与目标图片的绑定顺序不一致，请重新生成视频编辑指令"
+                )
+            if next_image_index - 1 > 8:
+                raise CanvasReplacementTaskError("一次多主体替换最多使用 8 张目标参考图")
         prompts: list[dict[str, Any]] = []
         for shot in sorted(shots, key=lambda item: int(item["index"])):
             shot_index = int(shot["index"])
-            action = action_by_shot.get(
-                shot_index,
-                f"{source_object_name} 出现在当前连续片段中，保持原有位置、动作与遮挡关系。",
-            )
-            prompts.append({
-                "shot_index": shot_index,
-                "prompt": template.render_shot_replacement_video(
+            if subject_references:
+                replacement_items: list[str] = []
+                for subject, references in subject_references:
+                    subject_shot_indices = {
+                        int(index) for index in subject.get("shot_indices") or []
+                        if isinstance(index, int)
+                    }
+                    if subject_shot_indices and shot_index not in subject_shot_indices:
+                        continue
+                    subject_actions = {
+                        int(item["shot_index"]): str(item["description"])
+                        for item in subject.get("actions") or []
+                        if isinstance(item, dict) and isinstance(item.get("shot_index"), int)
+                    }
+                    subject_name = str(subject.get("source_object_name") or "源视频中的对象")
+                    subject_description = str(
+                        subject.get("source_object_description") or "源视频中的该对象"
+                    )
+                    target_description_item = str(
+                        subject.get("target_description")
+                        or "以绑定目标参考图片展示的外观、颜色、材质与结构为准"
+                    )
+                    shot_action_item = subject_actions.get(
+                        shot_index,
+                        f"{subject_name} 出现在当前连续片段中，保持原有位置、动作与遮挡关系。",
+                    )
+                    replacement_items.append(
+                        f"- 将视频中的“{subject_name}”（{subject_description}）全部替换为 "
+                        f"{references} 所示的目标对象。\n"
+                        f"  - 目标对象说明：{target_description_item}。\n"
+                        f"  - 当前片段中的出现状态：{shot_action_item}"
+                    )
+                if not replacement_items:
+                    continue
+                prompt = template.render_multi_shot_replacement_video(
+                    "\n".join(replacement_items)
+                )
+            else:
+                action = action_by_shot.get(
+                    shot_index,
+                    f"{source_object_name} 出现在当前连续片段中，保持原有位置、动作与遮挡关系。",
+                )
+                prompt = template.render_shot_replacement_video(
                     source_object_name=source_object_name,
                     source_object_description=source_object_description,
                     target_description=target_description,
                     target_image_references=image_references,
                     shot_action=action,
-                ),
+                )
+            prompts.append({
+                "shot_index": shot_index,
+                "prompt": prompt,
                 "input_revision": 3,
                 "status": "ready",
             })
@@ -109,10 +183,14 @@ class CanvasReplacementTaskService:
         shots: list[dict[str, Any]],
         prompts: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not self.config.api_key:
-            raise CanvasReplacementTaskError("未配置 ARK_API_KEY，不能提交逐镜头视频替换任务")
-        if model not in SEEDANCE_MODELS:
-            raise CanvasReplacementTaskError("不支持的逐镜头替换模型")
+        submit_started = time.perf_counter()
+        try:
+            provider, model_profile = self.provider_registry.resolve(
+                model,
+                capability="subject_replace",
+            )
+        except VideoGenerationProviderError as exc:
+            raise CanvasReplacementTaskError(str(exc)) from exc
         if not shots:
             raise CanvasReplacementTaskError("至少选择一个需要替换的镜头")
         prompt_by_shot = {
@@ -125,10 +203,43 @@ class CanvasReplacementTaskService:
         if any(int(item.get("input_revision") or 0) != 3 for item in prompts):
             raise CanvasReplacementTaskError("视频编辑指令使用的是旧结构，请重新生成视频编辑指令后再提交")
 
+        logger.info(
+            "canvas.video.replacement.submit.start project_id=%s provider=%s model=%s "
+            "target_asset_ids=%s shot_indices=%s prompt_count=%d",
+            project_id,
+            provider.key,
+            model,
+            target_asset_ids,
+            [int(shot["index"]) for shot in shots],
+            len(prompts),
+        )
+        for prompt_item in sorted(prompts, key=lambda item: int(item["shot_index"])):
+            logger.info(
+                "canvas.video.replacement.prompt project_id=%s provider=%s model=%s shot_index=%02d "
+                "input_revision=%s status=%s\n%s",
+                project_id,
+                provider.key,
+                model,
+                int(prompt_item["shot_index"]),
+                prompt_item.get("input_revision"),
+                prompt_item.get("status"),
+                str(prompt_item.get("prompt") or ""),
+            )
+
+        target_upload_started = time.perf_counter()
         target_urls = await asyncio.gather(*[
             self._upload_asset(project_id, asset_id, expected_prefix="image/")
-            for asset_id in dict.fromkeys(target_asset_ids)
+            for asset_id in target_asset_ids
         ])
+        logger.info(
+            "canvas.video.replacement.targets.uploaded project_id=%s provider=%s "
+            "target_asset_ids=%s target_urls=%s elapsed_seconds=%.3f",
+            project_id,
+            provider.key,
+            target_asset_ids,
+            [self._safe_url(url) for url in target_urls],
+            time.perf_counter() - target_upload_started,
+        )
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_SUBMISSIONS)
 
         async def submit_shot(shot: dict[str, Any]) -> dict[str, Any]:
@@ -137,23 +248,57 @@ class CanvasReplacementTaskService:
                 try:
                     return await self._submit_one(
                         project_id,
-                        model=model,
+                        provider=provider,
+                        model=model_profile,
                         shot=shot,
                         prompt=prompt_by_shot[shot_index],
                         target_urls=target_urls,
                     )
-                except CanvasReplacementTaskError as exc:
-                    return self._result_payload(shot, status="failed", error=str(exc))
+                except (CanvasReplacementTaskError, VideoGenerationProviderError) as exc:
+                    logger.error(
+                        "canvas.video.replacement.shot.failed project_id=%s provider=%s model=%s "
+                        "shot_index=%02d error=%s",
+                        project_id,
+                        provider.key,
+                        model,
+                        shot_index,
+                        exc,
+                    )
+                    return self._result_payload(
+                        shot,
+                        model=model_profile.id,
+                        status="failed",
+                        error=str(exc),
+                    )
 
-        return await asyncio.gather(*[
+        results = await asyncio.gather(*[
             submit_shot(shot)
             for shot in sorted(shots, key=lambda item: int(item["index"]))
         ])
+        logger.info(
+            "canvas.video.replacement.submit.done project_id=%s provider=%s model=%s results=%s "
+            "elapsed_seconds=%.3f",
+            project_id,
+            provider.key,
+            model,
+            [
+                {
+                    "shot_index": result.get("shot_index"),
+                    "status": result.get("status"),
+                    "provider_task_id": result.get("provider_task_id"),
+                    "error": result.get("error"),
+                }
+                for result in results
+            ],
+            time.perf_counter() - submit_started,
+        )
+        return results
 
     async def refresh(
         self,
         project_id: str,
         *,
+        model: str,
         provider_task_id: str,
         shot: dict[str, Any],
         existing_result_asset_id: str = "",
@@ -166,89 +311,105 @@ class CanvasReplacementTaskService:
             else:
                 return self._result_payload(
                     shot,
+                    model=model,
                     status="succeeded",
                     provider_task_id=provider_task_id,
                     result_asset=asset,
                 )
-        if not self.config.api_key:
-            raise CanvasReplacementTaskError("未配置 ARK_API_KEY，不能刷新视频替换任务")
         if not provider_task_id:
-            raise CanvasReplacementTaskError("缺少方舟视频任务标识")
+            raise CanvasReplacementTaskError("缺少视频供应商任务标识")
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.get(
-                    f"{self.config.api_url.rstrip('/')}/{provider_task_id}",
-                    headers={"Authorization": f"Bearer {self.config.api_key}"},
-                )
-        except httpx.HTTPError as exc:
-            raise CanvasReplacementTaskError(f"查询视频替换任务失败：{exc}") from exc
-        body = self._response_json(response)
-        if response.is_error:
-            raise CanvasReplacementTaskError(self._provider_error(body, response.status_code))
-        status = self._task_status(body)
+            selected_provider, model_profile = self.provider_registry.resolve(
+                model,
+                capability="subject_replace",
+            )
+            snapshot = await selected_provider.refresh(
+                model_profile,
+                provider_task_id,
+                VideoProviderContext(
+                    project_id=project_id,
+                    shot_index=int(shot["index"]),
+                    source_asset_id=str(shot.get("asset_id") or ""),
+                    source_asset_name=str(shot.get("asset_name") or ""),
+                ),
+            )
+        except VideoGenerationProviderError as exc:
+            raise CanvasReplacementTaskError(str(exc)) from exc
         result_asset = None
-        if status == "succeeded":
-            video_url = self._video_url(body)
-            if not video_url:
+        if snapshot.status == "succeeded":
+            if not snapshot.result_url:
                 raise CanvasReplacementTaskError("视频任务已完成，但没有返回可下载的视频地址")
-            result_asset = await self._download_result(project_id, shot, video_url)
+            result_asset = await self._download_result(project_id, shot, snapshot.result_url)
         return self._result_payload(
             shot,
-            status=status,
-            provider_task_id=provider_task_id,
+            model=snapshot.model,
+            status=snapshot.status,
+            provider_task_id=snapshot.provider_task_id,
             result_asset=result_asset,
-            error=self._provider_failure(body) if status == "failed" else "",
+            error=snapshot.error,
         )
 
     async def _submit_one(
         self,
         project_id: str,
         *,
-        model: str,
+        provider: VideoGenerationProvider,
+        model: VideoModelProfile,
         shot: dict[str, Any],
         prompt: str,
         target_urls: list[str],
     ) -> dict[str, Any]:
-        source_url, duration, ratio = await self._upload_shot_video(project_id, shot)
-        request_payload = {
-            "model": model,
-            "content": self._request_content(prompt, source_url, target_urls),
-            "generate_audio": False,
-            "watermark": False,
-            "duration": duration,
-            "ratio": ratio,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    self.config.api_url,
-                    headers={"Authorization": f"Bearer {self.config.api_key}"},
-                    json=request_payload,
-                )
-        except httpx.HTTPError as exc:
-            raise CanvasReplacementTaskError(f"镜头 {int(shot['index']):02d} 提交失败：{exc}") from exc
-        body = self._response_json(response)
-        if response.is_error:
-            raise CanvasReplacementTaskError(self._provider_error(body, response.status_code))
-        provider_task_id = body.get("id") if isinstance(body, dict) else None
-        if not isinstance(provider_task_id, str) or not provider_task_id:
-            raise CanvasReplacementTaskError("视频替换接口没有返回任务标识")
-        status = self._task_status(body)
+        shot_index = int(shot["index"])
+        source_upload_started = time.perf_counter()
+        source_url, duration, ratio = await self._upload_shot_video(
+            project_id,
+            shot,
+            min_duration_seconds=model.min_duration_seconds,
+            max_duration_seconds=model.max_duration_seconds,
+        )
+        source_upload_elapsed = time.perf_counter() - source_upload_started
+        snapshot = await provider.submit(
+            model,
+            VideoEditRequest(
+                prompt=prompt,
+                source_video_url=source_url,
+                reference_image_urls=tuple(target_urls),
+                duration_seconds=duration,
+                aspect_ratio=ratio,
+            ),
+            VideoProviderContext(
+                project_id=project_id,
+                shot_index=shot_index,
+                source_asset_id=str(shot.get("asset_id") or ""),
+                source_asset_name=str(shot.get("asset_name") or ""),
+                source_upload_seconds=source_upload_elapsed,
+            ),
+        )
         result_asset = None
-        if status == "succeeded":
-            video_url = self._video_url(body)
-            if video_url:
-                result_asset = await self._download_result(project_id, shot, video_url)
+        if snapshot.status == "succeeded" and snapshot.result_url:
+            result_asset = await self._download_result(project_id, shot, snapshot.result_url)
         return self._result_payload(
             shot,
-            status=status,
-            provider_task_id=provider_task_id,
+            model=snapshot.model,
+            status=snapshot.status,
+            provider_task_id=snapshot.provider_task_id,
             result_asset=result_asset,
-            error=self._provider_failure(body) if status == "failed" else "",
+            error=snapshot.error,
         )
 
+    @staticmethod
+    def _safe_url(url: str) -> str:
+        """Keep the object location visible in logs without leaking its signature."""
+        parsed = urlsplit(url)
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
     async def _upload_shot_video(
-        self, project_id: str, shot: dict[str, Any]
+        self,
+        project_id: str,
+        shot: dict[str, Any],
+        *,
+        min_duration_seconds: float,
+        max_duration_seconds: float,
     ) -> tuple[str, int, str]:
         asset_id = str(shot["asset_id"])
         try:
@@ -258,15 +419,14 @@ class CanvasReplacementTaskService:
         if not str(asset.get("mime_type") or "").startswith("video/"):
             raise CanvasReplacementTaskError(f"镜头 {int(shot['index']):02d} 不是视频素材")
         source_duration = float(shot["duration_seconds"])
-        if not MIN_SEEDANCE_VIDEO_SECONDS <= source_duration <= MAX_SEEDANCE_VIDEO_SECONDS:
+        if not min_duration_seconds <= source_duration <= max_duration_seconds:
             raise CanvasReplacementTaskError(
-                f"镜头 {int(shot['index']):02d} 时长为 {source_duration:.2f} 秒，不在 Seedance "
-                f"{MIN_SEEDANCE_VIDEO_SECONDS:.0f}–{MAX_SEEDANCE_VIDEO_SECONDS:.0f} 秒范围内；请在原视频节点重新按镜头分段"
+                f"镜头 {int(shot['index']):02d} 时长为 {source_duration:.2f} 秒，不在视频编辑 "
+                f"{min_duration_seconds:.0f}–{max_duration_seconds:.0f} 秒范围内；请在原视频节点重新按镜头分段"
             )
         source_url = await self._upload_path(project_id, source_path, "video/mp4")
-        # Seedance accepts whole seconds. Round upward, then trim the generated
-        # result back to the source segment during composition instead of padding
-        # the source video with fake frames.
+        # Providers receive whole-second jobs; composition later trims the result
+        # back to the exact source segment duration.
         return source_url, math.ceil(source_duration), self._video_ratio(source_path)
 
     async def _upload_asset(self, project_id: str, asset_id: str, *, expected_prefix: str) -> str:
@@ -294,7 +454,7 @@ class CanvasReplacementTaskService:
                         project_id, source, size, path.name, mime_type
                     )
                 return self.object_storage.presign_download(object_key)
-            except ObjectStorageError as exc:
+            except VideoAssetPublisherError as exc:
                 raise CanvasReplacementTaskError(f"上传视频替换素材失败：{exc}") from exc
 
         return await asyncio.to_thread(upload)
@@ -325,33 +485,10 @@ class CanvasReplacementTaskService:
         return f"@图片1 至 @图片{count}"
 
     @staticmethod
-    def _request_content(
-        prompt: str, source_url: str, target_urls: list[str]
-    ) -> list[dict[str, Any]]:
-        """Keep the multimodal reference order aligned with the prompt template.
-
-        @视频1 is the source edit segment and every image is a target-object
-        reference. The compact input package matches the video-edit workflow.
-        """
-        return [
-            {"type": "text", "text": prompt},
-            {"type": "video_url", "role": "reference_video", "video_url": {"url": source_url}},
-            *[
-                {"type": "image_url", "role": "reference_image", "image_url": {"url": url}}
-                for url in target_urls
-            ],
-        ]
-
-    @staticmethod
-    def _task_status(body: Any) -> str:
-        raw = str(body.get("status") or "queued").lower() if isinstance(body, dict) else "failed"
-        if raw in {"succeeded", "success", "completed"}:
-            return "succeeded"
-        if raw in {"failed", "error", "cancelled", "canceled"}:
-            return "failed"
-        if raw in {"running", "processing", "in_progress"}:
-            return "running"
-        return "queued"
+    def _image_reference_range(start: int, count: int) -> str:
+        if count == 1:
+            return f"@图片{start}"
+        return f"@图片{start} 至 @图片{start + count - 1}"
 
     @staticmethod
     def _video_ratio(source_path: Path) -> str:
@@ -368,36 +505,10 @@ class CanvasReplacementTaskService:
         return min(candidates, key=lambda item: abs(candidates[item] - ratio))
 
     @staticmethod
-    def _response_json(response: httpx.Response) -> Any:
-        try:
-            return response.json()
-        except ValueError:
-            return {"raw": response.text[:2_000]}
-
-    @staticmethod
-    def _video_url(body: Any) -> str:
-        content = body.get("content") if isinstance(body, dict) else None
-        url = content.get("video_url") if isinstance(content, dict) else None
-        return url if isinstance(url, str) and url.startswith(("https://", "http://")) else ""
-
-    @staticmethod
-    def _provider_failure(body: Any) -> str:
-        if isinstance(body, dict):
-            error = body.get("error")
-            if isinstance(error, dict) and isinstance(error.get("message"), str):
-                return error["message"]
-            if isinstance(body.get("message"), str):
-                return str(body["message"])
-        return "视频替换任务失败"
-
-    @classmethod
-    def _provider_error(cls, body: Any, status_code: int) -> str:
-        return f"Seedance 视频替换接口返回 {status_code}：{cls._provider_failure(body)}"
-
-    @staticmethod
     def _result_payload(
         shot: dict[str, Any],
         *,
+        model: str,
         status: str,
         provider_task_id: str = "",
         result_asset: dict[str, Any] | None = None,
@@ -408,6 +519,7 @@ class CanvasReplacementTaskService:
             "source_asset_id": str(shot["asset_id"]),
             "source_asset_name": str(shot["asset_name"]),
             "duration_seconds": float(shot["duration_seconds"]),
+            "model": model,
             "provider_task_id": provider_task_id,
             "status": status,
             "result_asset": result_asset,

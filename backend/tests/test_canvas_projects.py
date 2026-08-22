@@ -78,6 +78,74 @@ def test_default_canvas_is_created_once(tmp_path):
     assert len(service.list_projects()) == 1
 
 
+def test_provider_submission_is_persisted_and_survives_a_stale_browser_save(tmp_path):
+    service = CanvasProjectService(
+        tmp_path / "canvas_projects.sqlite3",
+        tmp_path / "canvas_projects",
+    )
+    service.initialize()
+    project = service.create_project("提交恢复测试")
+    shot = {
+        "index": 2,
+        "start_seconds": 8.0,
+        "end_seconds": 12.9,
+        "duration_seconds": 4.9,
+        "asset_id": "a" * 32,
+        "asset_url": "/asset/shot-02",
+        "asset_name": "shot-02.mp4",
+    }
+    task_node = {
+        "id": "task-1",
+        "kind": "replacement_task",
+        "x": 100,
+        "y": 200,
+        "title": "多主体替换",
+        "detail": "正在提交",
+        "content": "",
+        "operation": {"status": "running"},
+        "replacement_task": {
+            "source_object_id": "object-1",
+            "source_object_name": "白鞋",
+            "subjects": [
+                {"source_object_name": "白鞋"},
+                {"source_object_name": "卡通袜"},
+            ],
+            "shot_prompts": [{"shot_index": 2, "prompt": "替换", "status": "ready"}],
+        },
+    }
+    stale_payload = {
+        "name": "提交恢复测试",
+        "nodes": [task_node],
+        "edges": [],
+        "viewport": {"x": 0, "y": 0, "scale": 0.9},
+    }
+    service.update_project(project["id"], stale_payload)
+    service.record_replacement_submission(
+        project["id"],
+        task_node_id="task-1",
+        output_node_id="output-1",
+        shots=[shot],
+        results=[{
+            "shot_index": 2,
+            "provider_task_id": "provider-task-1",
+            "status": "queued",
+            "error": "",
+        }],
+    )
+
+    service.update_project(project["id"], stale_payload)
+
+    restored = service.get_project(project["id"])
+    restored_task = next(node for node in restored["nodes"] if node["id"] == "task-1")
+    restored_output = next(node for node in restored["nodes"] if node["id"] == "output-1")
+    version = restored_output["shot_assets"][0]["replacement_versions"][0]
+    assert restored_task["operation"]["status"] == "succeeded"
+    assert restored_task["replacement_task"]["output_shot_collection_node_id"] == "output-1"
+    assert version["provider_task_id"] == "provider-task-1"
+    assert version["status"] == "queued"
+    assert any(edge["target"] == "output-1" for edge in restored["edges"])
+
+
 def test_shot_collection_node_keeps_all_local_shot_assets():
     request = CanvasProjectUpdateRequest.model_validate({
         "name": "分镜测试",
@@ -107,7 +175,7 @@ def test_shot_collection_node_keeps_all_local_shot_assets():
                 "asset_name": "shot-01.mp4",
                 "replacement_versions": [{
                     "task_node_id": "task-1",
-                    "source_object_id": "object-1",
+                    "source_object_id": "object-1+object-2",
                     "source_object_name": "深色编织托盘",
                     "provider_task_id": "task-01",
                     "status": "queued",
@@ -130,6 +198,7 @@ def test_shot_collection_node_keeps_all_local_shot_assets():
     assert [shot.asset_name for shot in request.nodes[0].shot_assets] == ["shot-01.mp4", "shot-02.mp4"]
     assert request.nodes[0].reference_assets[0].filename == "product-reference.png"
     assert request.nodes[0].shot_assets[0].replacement_versions[0].provider_task_id == "task-01"
+    assert request.nodes[0].shot_assets[0].replacement_versions[0].source_object_id == "object-1+object-2"
 
 
 def test_replacement_analysis_and_task_nodes_persist_their_shot_level_prompt_data():
@@ -217,3 +286,30 @@ def test_replacement_composition_request_keeps_original_audio_and_all_shots():
 
     assert request.source_audio_asset_id == "a" * 32
     assert request.results[0].result_asset_id == "c" * 32
+
+
+def test_replacement_composition_allows_a_silent_output():
+    request = CanvasReplacementCompositionRequest.model_validate({
+        "shots": [{
+            "index": 1,
+            "start_seconds": 0,
+            "end_seconds": 4,
+            "duration_seconds": 4,
+            "asset_id": "a" * 32,
+            "asset_url": "/asset/source",
+            "asset_name": "shot-01.mp4",
+        }],
+        "results": [{
+            "shot_index": 1,
+            "source_asset_id": "a" * 32,
+            "source_asset_name": "shot-01.mp4",
+            "duration_seconds": 4,
+            "provider_task_id": "task-01",
+            "status": "succeeded",
+            "result_asset_id": "b" * 32,
+            "result_asset_url": "/asset/result",
+            "result_asset_name": "result-01.mp4",
+        }],
+    })
+
+    assert request.source_audio_asset_id == ""

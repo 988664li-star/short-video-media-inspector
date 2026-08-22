@@ -27,6 +27,10 @@ class SiliconFlowRequestError(SiliconFlowError):
     """The external visual model could not return a usable response."""
 
 
+class SiliconFlowTransportError(SiliconFlowRequestError):
+    """A transient network, timeout, throttling, or provider-server failure."""
+
+
 @dataclass(frozen=True)
 class SiliconFlowConfig:
     api_key: str
@@ -95,11 +99,24 @@ class SiliconFlowClient:
             trace_id = response.headers.get("x-siliconcloud-trace-id", "")
             detail = response.text.strip().replace("\n", " ")[:800]
             suffix = f"；trace_id={trace_id}" if trace_id else ""
-            raise SiliconFlowRequestError(
-                f"视觉模型请求失败（HTTP {response.status_code}）：{detail}{suffix}"
+            error_type = SiliconFlowTransportError if (
+                response.status_code in {408, 429} or response.status_code >= 500
+            ) else SiliconFlowRequestError
+            raise error_type(
+                f"视觉模型请求失败（HTTP {response.status_code}）：{detail or '服务端未返回错误详情'}{suffix}"
             ) from exc
-        except (httpx.HTTPError, ValueError) as exc:
-            raise SiliconFlowRequestError(f"视觉模型请求失败：{exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise SiliconFlowTransportError(
+                f"视觉模型请求超时（{type(exc).__name__}，读取上限 {timeout_seconds:g} 秒）"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise SiliconFlowTransportError(
+                f"视觉模型网络请求失败（{type(exc).__name__}）：{str(exc) or '连接被中断'}"
+            ) from exc
+        except ValueError as exc:
+            raise SiliconFlowRequestError(
+                f"视觉模型响应解析失败（{type(exc).__name__}）：{str(exc) or '响应不是有效 JSON'}"
+            ) from exc
 
         logger.info(
             "SiliconFlow 完整 API 响应%s [model=%s]: %s",

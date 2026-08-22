@@ -134,8 +134,18 @@ class CanvasNodeOperationRequest(StrictRequest):
 
 class CanvasShotReplacementVersionRequest(StrictRequest):
     task_node_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
-    source_object_id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
+    # Older multi-subject clients joined IDs with "+". Keep those queued task
+    # versions readable while new clients persist only the primary subject ID.
+    source_object_id: str = Field(min_length=1, max_length=720, pattern=r"^[a-zA-Z0-9_+\-]+$")
     source_object_name: str = Field(min_length=1, max_length=160)
+    # Transitional input only. Provider routing is derived exclusively from model.
+    provider: str | None = Field(default=None, max_length=80, exclude=True)
+    model: str = Field(
+        default="doubao-seedance-2-0-mini-260615",
+        min_length=1,
+        max_length=160,
+        pattern=r"^[a-zA-Z0-9_.-]+$",
+    )
     provider_task_id: str = Field(default="", max_length=160)
     status: Literal["pending", "queued", "running", "succeeded", "failed"] = "pending"
     result_asset_id: str = Field(default="", max_length=64, pattern=r"^[a-f0-9]{32}$|^$")
@@ -186,6 +196,19 @@ class CanvasReplacementShotPromptRequest(StrictRequest):
     error: str = Field(default="", max_length=2_000)
 
 
+class CanvasReplacementSubjectRequest(StrictRequest):
+    source_object_id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
+    source_object_kind: Literal["product", "person", "background", "text", "other"]
+    source_object_name: str = Field(min_length=1, max_length=160)
+    source_object_description: str = Field(default="", max_length=2_000)
+    shot_indices: list[int] = Field(default_factory=list, max_length=500)
+    actions: list[CanvasReplaceableActionRequest] = Field(default_factory=list, max_length=500)
+    target_description: str = Field(default="", max_length=2_000)
+    target_node_id: str | None = Field(
+        default=None, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$"
+    )
+
+
 class CanvasReplacementTaskRequest(StrictRequest):
     analysis_node_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
     shot_collection_node_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
@@ -199,6 +222,7 @@ class CanvasReplacementTaskRequest(StrictRequest):
     shot_indices: list[int] = Field(default_factory=list, max_length=500)
     actions: list[CanvasReplaceableActionRequest] = Field(default_factory=list, max_length=500)
     target_description: str = Field(default="", max_length=2_000)
+    subjects: list[CanvasReplacementSubjectRequest] = Field(default_factory=list, max_length=8)
     selected_shot_indices: list[int] = Field(default_factory=list, max_length=500)
     shot_prompts: list[CanvasReplacementShotPromptRequest] = Field(default_factory=list, max_length=500)
 
@@ -208,6 +232,14 @@ class CanvasReplacementResultRequest(StrictRequest):
     source_asset_id: str = Field(max_length=64, pattern=r"^[a-f0-9]{32}$")
     source_asset_name: str = Field(min_length=1, max_length=255)
     duration_seconds: float = Field(gt=0, le=86_400)
+    # Transitional input only. Provider routing is derived exclusively from model.
+    provider: str | None = Field(default=None, max_length=80, exclude=True)
+    model: str = Field(
+        default="doubao-seedance-2-0-mini-260615",
+        min_length=1,
+        max_length=160,
+        pattern=r"^[a-zA-Z0-9_.-]+$",
+    )
     provider_task_id: str = Field(default="", max_length=160)
     status: Literal["pending", "queued", "running", "succeeded", "failed", "original"] = "pending"
     result_asset_id: str = Field(default="", max_length=64, pattern=r"^[a-f0-9]{32}$|^$")
@@ -221,6 +253,7 @@ class CanvasReferenceAssetRequest(StrictRequest):
     url: str = Field(max_length=1_000)
     filename: str = Field(min_length=1, max_length=255)
     mime_type: str = Field(min_length=1, max_length=120)
+    label: str = Field(default="", max_length=80)
 
 
 class CanvasNodeRequest(StrictRequest):
@@ -234,6 +267,7 @@ class CanvasNodeRequest(StrictRequest):
     title: str = Field(min_length=1, max_length=160)
     detail: str = Field(default="", max_length=600)
     content: str = Field(default="", max_length=32_768)
+    source_context: str = Field(default="", max_length=4_000)
     asset_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-f0-9]{32}$")
     asset_url: str | None = Field(default=None, max_length=1_000)
     asset_name: str | None = Field(default=None, max_length=255)
@@ -289,8 +323,38 @@ class CanvasVideoAssetRequest(StrictRequest):
     asset_id: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
 
 
+class CanvasVideoComparisonRequest(StrictRequest):
+    video_asset_ids: list[str] = Field(min_length=2, max_length=3)
+    audio_asset_id: str = Field(default="", max_length=32, pattern=r"^[a-f0-9]{32}$|^$")
+
+    @field_validator("video_asset_ids")
+    @classmethod
+    def validate_video_asset_ids(cls, value: list[str]) -> list[str]:
+        if any(
+            len(asset_id) != 32
+            or any(character not in "0123456789abcdef" for character in asset_id)
+            for asset_id in value
+        ):
+            raise ValueError("视频素材 ID 格式不正确")
+        if len(set(value)) != len(value):
+            raise ValueError("对比视频不能重复使用同一个视频素材")
+        return value
+
+
 class CanvasReplacementAnalysisRequest(StrictRequest):
     shots: list[CanvasShotAssetRequest] = Field(min_length=1, max_length=120)
+    source_context: str = Field(default="", max_length=4_000)
+
+
+class CanvasReplacementPromptSubjectRequest(StrictRequest):
+    source_object_id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
+    source_object_kind: Literal["product", "person", "background", "text", "other"]
+    source_object_name: str = Field(min_length=1, max_length=160)
+    source_object_description: str = Field(default="", max_length=2_000)
+    shot_indices: list[int] = Field(default_factory=list, max_length=500)
+    actions: list[CanvasReplaceableActionRequest] = Field(default_factory=list, max_length=500)
+    target_description: str = Field(default="", max_length=2_000)
+    target_asset_ids: list[str] = Field(min_length=1, max_length=8)
 
 
 class CanvasReplacementPromptBuildRequest(StrictRequest):
@@ -300,14 +364,15 @@ class CanvasReplacementPromptBuildRequest(StrictRequest):
     target_asset_ids: list[str] = Field(min_length=1, max_length=8)
     shots: list[CanvasShotAssetRequest] = Field(min_length=1, max_length=120)
     actions: list[CanvasReplaceableActionRequest] = Field(default_factory=list, max_length=500)
+    subjects: list[CanvasReplacementPromptSubjectRequest] = Field(default_factory=list, max_length=8)
 
 
 class CanvasReplacementTaskSubmitRequest(StrictRequest):
-    model: Literal[
-        "doubao-seedance-2-0-mini-260615",
-        "doubao-seedance-2-0-260128",
-        "doubao-seedance-2-0-fast-260128",
-    ] = "doubao-seedance-2-0-mini-260615"
+    task_node_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    output_shot_collection_node_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$"
+    )
+    model: str = Field(min_length=1, max_length=160, pattern=r"^[a-zA-Z0-9_.-]+$")
     target_asset_ids: list[str] = Field(min_length=1, max_length=8)
     shots: list[CanvasShotAssetRequest] = Field(min_length=1, max_length=120)
     prompts: list[CanvasReplacementShotPromptRequest] = Field(min_length=1, max_length=120)
@@ -323,7 +388,19 @@ class CanvasReplacementTaskSubmitRequest(StrictRequest):
 
 
 class CanvasReplacementTaskRefreshRequest(StrictRequest):
+    model: str = Field(
+        default="doubao-seedance-2-0-mini-260615",
+        min_length=1,
+        max_length=160,
+        pattern=r"^[a-zA-Z0-9_.-]+$",
+    )
     provider_task_id: str = Field(min_length=1, max_length=160)
+    task_node_id: str | None = Field(
+        default=None, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$"
+    )
+    output_shot_collection_node_id: str | None = Field(
+        default=None, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$"
+    )
     shot: CanvasShotAssetRequest
     result_asset_id: str = Field(default="", max_length=64, pattern=r"^[a-f0-9]{32}$|^$")
 
@@ -331,7 +408,7 @@ class CanvasReplacementTaskRefreshRequest(StrictRequest):
 class CanvasReplacementCompositionRequest(StrictRequest):
     shots: list[CanvasShotAssetRequest] = Field(min_length=1, max_length=120)
     results: list[CanvasReplacementResultRequest] = Field(min_length=1, max_length=120)
-    source_audio_asset_id: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
+    source_audio_asset_id: str = Field(default="", max_length=32, pattern=r"^[a-f0-9]{32}$|^$")
 
 
 class CookieRequest(StrictRequest):

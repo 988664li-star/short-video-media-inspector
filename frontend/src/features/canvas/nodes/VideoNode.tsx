@@ -18,10 +18,13 @@ export function VideoNode({
   width,
   height,
 }: NodeProps<CanvasFlowNode>) {
-  const { previewMedia, uploadNodeAsset, uploadingNodeId } = useCanvasNodeActions();
+  const { getUpstreamNodes, previewMedia, uploadNodeAsset, uploadingNodeId } = useCanvasNodeActions();
   const { node } = data;
   const fileInput = useRef<HTMLInputElement>(null);
   const uploading = uploadingNodeId === id;
+  const connectedVideoCount = new Set(getUpstreamNodes(id)
+    .filter((source) => source.kind === "video" && source.asset_id)
+    .map((source) => source.asset_id)).size;
   return (
     <>
       <VideoNodeCapabilities id={id} node={node} selected={selected && !dragging} />
@@ -43,7 +46,9 @@ export function VideoNode({
         <div className="canvas-node__media canvas-node__media--video">
           {node.asset_url ? <video src={node.asset_url} muted playsInline preload="metadata" /> : (
             <div className="canvas-node__empty-media">
-              <span>上传视频，或在下方配置视频创作指令</span>
+              <span>{connectedVideoCount >= 2 && connectedVideoCount <= 3
+                ? `已连接 ${connectedVideoCount} 个视频，点击上方“生成对比视频”`
+                : "上传视频，或连接 2～3 个视频生成同步对比视频"}</span>
               <button type="button" disabled={uploading} onClick={() => fileInput.current?.click()}>
                 <Upload /> {uploading ? "上传中…" : "上传视频"}
               </button>

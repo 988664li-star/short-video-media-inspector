@@ -27,6 +27,8 @@ export interface CanvasNode {
   title: string;
   detail: string;
   content: string;
+  /** Original post title/caption used as semantic context by downstream analysis. */
+  source_context?: string;
   asset_id?: string;
   asset_url?: string;
   asset_name?: string;
@@ -48,6 +50,8 @@ export interface CanvasReferenceAsset {
   url: string;
   filename: string;
   mime_type: string;
+  /** User-facing name used by @ references, e.g. “商品参考图”. */
+  label?: string;
 }
 
 /** Complete, ordered shot data held by one compact "分镜组" canvas node. */
@@ -67,6 +71,7 @@ export interface CanvasShotReplacementVersion {
   task_node_id: string;
   source_object_id: string;
   source_object_name: string;
+  model: string;
   provider_task_id: string;
   status: "pending" | "queued" | "running" | "succeeded" | "failed";
   result_asset_id?: string;
@@ -105,17 +110,38 @@ export interface CanvasReplacementShotPrompt {
   error?: string;
 }
 
+/** One source subject and its explicitly bound target-image node. */
+export interface CanvasReplacementSubject {
+  source_object_id: string;
+  source_object_kind: CanvasReplaceableKind;
+  source_object_name: string;
+  source_object_description: string;
+  shot_indices: number[];
+  actions: Array<{ shot_index: number; description: string }>;
+  target_description: string;
+  target_node_id?: string;
+}
+
 export interface CanvasReplacementResult {
   shot_index: number;
   source_asset_id: string;
   source_asset_name: string;
   duration_seconds: number;
+  model: string;
   provider_task_id: string;
   status: "pending" | "queued" | "running" | "succeeded" | "failed" | "original";
   result_asset_id?: string;
   result_asset_url?: string;
   result_asset_name?: string;
   error?: string;
+}
+
+export interface CanvasVideoModel {
+  id: string;
+  label: string;
+  capabilities: string[];
+  min_duration_seconds: number;
+  max_duration_seconds: number;
 }
 
 /** Configuration held by one compact per-object, multi-shot replacement task. */
@@ -130,6 +156,7 @@ export interface CanvasReplacementTask {
   shot_indices: number[];
   actions: Array<{ shot_index: number; description: string }>;
   target_description: string;
+  subjects: CanvasReplacementSubject[];
   selected_shot_indices: number[];
   shot_prompts: CanvasReplacementShotPrompt[];
 }

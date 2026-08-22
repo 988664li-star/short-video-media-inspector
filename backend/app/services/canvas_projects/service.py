@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import sqlite3
@@ -120,6 +121,19 @@ class CanvasProjectService:
             "viewport": payload["viewport"],
         }
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current_row = connection.execute(
+                "SELECT document_json FROM canvas_projects WHERE id = ?", (project_id,)
+            ).fetchone()
+            if current_row is None:
+                raise CanvasProjectNotFoundError(project_id)
+            try:
+                current_document = json.loads(current_row["document_json"])
+            except json.JSONDecodeError:
+                current_document = dict(EMPTY_DOCUMENT)
+            document = self._preserve_submitted_replacement_state(
+                current_document, document
+            )
             updated = connection.execute(
                 """
                 UPDATE canvas_projects
@@ -134,6 +148,231 @@ class CanvasProjectService:
                 "SELECT * FROM canvas_projects WHERE id = ?", (project_id,)
             ).fetchone()
         return self._payload(row)
+
+    @staticmethod
+    def _preserve_submitted_replacement_state(
+        current: dict[str, Any], incoming: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Prevent a stale browser save from erasing paid provider submissions."""
+        merged = copy.deepcopy(incoming)
+        current_nodes = {
+            node.get("id"): node
+            for node in current.get("nodes") or []
+            if isinstance(node, dict) and node.get("id")
+        }
+        incoming_nodes = {
+            node.get("id"): node
+            for node in merged.get("nodes") or []
+            if isinstance(node, dict) and node.get("id")
+        }
+        protected_output_ids: set[str] = set()
+        for node_id, node in current_nodes.items():
+            task = node.get("replacement_task")
+            if not isinstance(task, dict) or node_id not in incoming_nodes:
+                continue
+            output_id = task.get("output_shot_collection_node_id")
+            output_node = current_nodes.get(output_id)
+            has_provider_submission = any(
+                version.get("provider_task_id")
+                for shot in (output_node or {}).get("shot_assets") or []
+                for version in shot.get("replacement_versions") or []
+                if isinstance(version, dict)
+            )
+            if not output_id or not has_provider_submission:
+                continue
+            protected_output_ids.add(output_id)
+            incoming_task_node = incoming_nodes[node_id]
+            incoming_task = incoming_task_node.get("replacement_task")
+            if not isinstance(incoming_task, dict):
+                continue
+            if not incoming_task.get("output_shot_collection_node_id"):
+                incoming_task["output_shot_collection_node_id"] = output_id
+            current_prompts = {
+                int(prompt.get("shot_index") or 0): prompt
+                for prompt in task.get("shot_prompts") or []
+                if isinstance(prompt, dict) and prompt.get("provider_task_id")
+            }
+            for prompt in incoming_task.get("shot_prompts") or []:
+                current_prompt = current_prompts.get(int(prompt.get("shot_index") or 0))
+                if current_prompt and not prompt.get("provider_task_id"):
+                    prompt.update(copy.deepcopy(current_prompt))
+            if incoming_task_node.get("operation", {}).get("status") == "running":
+                incoming_task_node["operation"] = copy.deepcopy(node.get("operation") or {})
+                incoming_task_node["detail"] = node.get("detail", incoming_task_node.get("detail", ""))
+
+        for output_id in protected_output_ids:
+            if output_id not in incoming_nodes:
+                restored_output = copy.deepcopy(current_nodes[output_id])
+                merged.setdefault("nodes", []).append(restored_output)
+                incoming_nodes[output_id] = restored_output
+        existing_edge_pairs = {
+            (edge.get("source"), edge.get("target"))
+            for edge in merged.get("edges") or []
+            if isinstance(edge, dict)
+        }
+        for edge in current.get("edges") or []:
+            if not isinstance(edge, dict) or edge.get("target") not in protected_output_ids:
+                continue
+            pair = (edge.get("source"), edge.get("target"))
+            if pair not in existing_edge_pairs:
+                merged.setdefault("edges", []).append(copy.deepcopy(edge))
+                existing_edge_pairs.add(pair)
+        return merged
+
+    def record_replacement_submission(
+        self,
+        project_id: str,
+        *,
+        task_node_id: str,
+        output_node_id: str,
+        shots: list[dict[str, Any]],
+        results: list[dict[str, Any]],
+    ) -> None:
+        """Durably attach provider task IDs before the browser can save again."""
+        now = int(time.time() * 1000)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT document_json FROM canvas_projects WHERE id = ?", (project_id,)
+            ).fetchone()
+            if row is None:
+                raise CanvasProjectNotFoundError(project_id)
+            try:
+                document = json.loads(row["document_json"])
+            except json.JSONDecodeError:
+                document = dict(EMPTY_DOCUMENT)
+            nodes = list(document.get("nodes") or [])
+            task_node = next(
+                (node for node in nodes if node.get("id") == task_node_id), None
+            )
+            if not isinstance(task_node, dict):
+                raise CanvasProjectNotFoundError(task_node_id)
+            task = task_node.get("replacement_task")
+            if not isinstance(task, dict):
+                raise CanvasProjectNotFoundError(task_node_id)
+
+            subjects = task.get("subjects") or []
+            subject_names = "、".join(
+                str(subject.get("source_object_name") or "")
+                for subject in subjects
+                if isinstance(subject, dict)
+            ) or str(task.get("source_object_name") or "替换主体")
+            subject_names = subject_names[:160]
+            source_object_id = str(task.get("source_object_id") or "object-1")
+            result_by_shot = {
+                int(result["shot_index"]): result
+                for result in results
+                if isinstance(result.get("shot_index"), int)
+            }
+            submitted_shots: list[dict[str, Any]] = []
+            for shot in shots:
+                shot_index = int(shot["index"])
+                result = result_by_shot.get(shot_index)
+                if result is None:
+                    continue
+                result_asset = result.get("result_asset") or {}
+                version = {
+                    "task_node_id": task_node_id,
+                    "source_object_id": source_object_id,
+                    "source_object_name": subject_names,
+                    "model": str(
+                        result.get("model")
+                        or (task_node.get("operation") or {}).get("model")
+                        or ""
+                    ),
+                    "provider_task_id": str(result.get("provider_task_id") or ""),
+                    "status": "pending" if result.get("status") == "original" else result.get("status", "pending"),
+                    "result_asset_id": str(result_asset.get("id") or result.get("result_asset_id") or ""),
+                    "result_asset_url": str(result_asset.get("url") or result.get("result_asset_url") or ""),
+                    "result_asset_name": str(result_asset.get("filename") or result.get("result_asset_name") or ""),
+                    "error": str(result.get("error") or ""),
+                }
+                submitted_shots.append({
+                    **shot,
+                    "replacement_versions": [version],
+                })
+
+            output_node = next(
+                (node for node in nodes if node.get("id") == output_node_id), None
+            )
+            if not isinstance(output_node, dict):
+                output_node = {
+                    "id": output_node_id,
+                    "kind": "shot_collection",
+                    "x": float(task_node.get("x") or 0) + 590,
+                    "y": float(task_node.get("y") or 0) + 12,
+                    "title": f"替换镜头组 · {subject_names}"[:160],
+                    "detail": f"已提交 {len(submitted_shots)} 个镜头任务；节点会自动刷新生成结果",
+                    "content": "",
+                    "source_node_id": task_node_id,
+                    "shot_assets": [],
+                }
+                nodes.append(output_node)
+            existing_shots = {
+                int(shot["index"]): shot
+                for shot in output_node.get("shot_assets") or []
+            }
+            for shot in submitted_shots:
+                shot_index = int(shot["index"])
+                existing = existing_shots.get(shot_index, {})
+                existing_versions = [
+                    version
+                    for version in existing.get("replacement_versions") or []
+                    if version.get("task_node_id") != task_node_id
+                ]
+                existing_shots[shot_index] = {
+                    **existing,
+                    **shot,
+                    "replacement_versions": [*existing_versions, *shot["replacement_versions"]],
+                }
+            output_node["shot_assets"] = [
+                existing_shots[index] for index in sorted(existing_shots)
+            ]
+            output_node["detail"] = (
+                f"已提交 {len(submitted_shots)} 个镜头任务；正在自动刷新生成结果"
+            )
+
+            task["output_shot_collection_node_id"] = output_node_id
+            for prompt in task.get("shot_prompts") or []:
+                result = result_by_shot.get(int(prompt.get("shot_index") or 0))
+                if result is None:
+                    continue
+                prompt["status"] = result.get("status", "pending")
+                prompt["provider_task_id"] = str(result.get("provider_task_id") or "")
+                result_asset = result.get("result_asset") or {}
+                prompt["result_asset_id"] = str(
+                    result_asset.get("id") or result.get("result_asset_id") or ""
+                )
+                prompt["error"] = str(result.get("error") or "")
+            task_node["detail"] = (
+                f"已提交 {len(submitted_shots)} 个独立镜头任务；结果会自动回写到替换镜头组"
+            )
+            operation = dict(task_node.get("operation") or {})
+            operation.update({
+                "status": "succeeded",
+                "error": "",
+                "message": f"已提交 {len(submitted_shots)} 个独立镜头任务，正在自动刷新结果",
+            })
+            task_node["operation"] = operation
+
+            edges = list(document.get("edges") or [])
+            if not any(
+                edge.get("source") == task_node_id and edge.get("target") == output_node_id
+                for edge in edges
+            ):
+                edges.append({
+                    "id": f"edge-{uuid4().hex}",
+                    "source": task_node_id,
+                    "target": output_node_id,
+                    "sourceHandle": "output",
+                    "targetHandle": "input",
+                })
+            document["nodes"] = nodes
+            document["edges"] = edges
+            connection.execute(
+                "UPDATE canvas_projects SET document_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(document, ensure_ascii=False, separators=(",", ":")), now, project_id),
+            )
 
     def save_asset(
         self, project_id: str, filename: str, mime_type: str, content: bytes

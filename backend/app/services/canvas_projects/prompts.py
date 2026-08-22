@@ -20,7 +20,10 @@ class CanvasPromptTemplates:
 
     replacement_analysis_system: str
     replacement_analysis_user: str
+    replacement_analysis_merge_system: str
+    replacement_analysis_merge_user: Template
     shot_replacement_video: Template
+    multi_shot_replacement_video: Template
 
     @classmethod
     def load(cls, directory: Path = DEFAULT_PROMPT_DIRECTORY) -> "CanvasPromptTemplates":
@@ -32,8 +35,17 @@ class CanvasPromptTemplates:
                 "replacement_analysis_user": (
                     directory / "replacement_analysis_user.md"
                 ).read_text(encoding="utf-8").strip(),
+                "replacement_analysis_merge_system": (
+                    directory / "replacement_analysis_merge_system.md"
+                ).read_text(encoding="utf-8").strip(),
+                "replacement_analysis_merge_user": Template(
+                    (directory / "replacement_analysis_merge_user.md").read_text(encoding="utf-8").strip()
+                ),
                 "shot_replacement_video": Template(
                     (directory / "shot_replacement_video.md").read_text(encoding="utf-8").strip()
+                ),
+                "multi_shot_replacement_video": Template(
+                    (directory / "multi_shot_replacement_video.md").read_text(encoding="utf-8").strip()
                 ),
             }
         except OSError as exc:
@@ -41,6 +53,14 @@ class CanvasPromptTemplates:
         if not all(templates.values()):
             raise CanvasPromptTemplateError("画布对象识别提示词模板不能为空")
         return cls(**templates)
+
+    def render_replacement_analysis_merge(self, observations_json: str) -> str:
+        try:
+            return self.replacement_analysis_merge_user.substitute(
+                observations_json=observations_json,
+            )
+        except (KeyError, ValueError) as exc:
+            raise CanvasPromptTemplateError("主体跨片段归并提示词模板参数不完整") from exc
 
     def render_shot_replacement_video(
         self,
@@ -61,3 +81,11 @@ class CanvasPromptTemplates:
             )
         except (KeyError, ValueError) as exc:
             raise CanvasPromptTemplateError("逐镜头替换提示词模板参数不完整") from exc
+
+    def render_multi_shot_replacement_video(self, replacement_items: str) -> str:
+        try:
+            return self.multi_shot_replacement_video.substitute(
+                replacement_items=replacement_items,
+            )
+        except (KeyError, ValueError) as exc:
+            raise CanvasPromptTemplateError("多主体逐镜头替换提示词模板参数不完整") from exc

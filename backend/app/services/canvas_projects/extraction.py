@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from io import BytesIO
+import logging
 from pathlib import Path
 import re
+import subprocess
+import tempfile
+import time
 from typing import Any, Literal
 
+import av
 import httpx
 
 from backend.app.services.douyin.resolver import resolve_share_text
@@ -17,6 +23,9 @@ from backend.app.services.session import LoginCookieStore
 from backend.app.services.tiktok.resolver import resolve_share_url as resolve_tiktok_share_url
 
 from .service import CanvasProjectService
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 MEDIA_PROXY_PATTERN = re.compile(r"^/api/media/([a-f0-9]{32})/(\d+)$")
@@ -48,12 +57,14 @@ class CanvasMediaExtractionService:
         media_registry: MediaRegistry,
         max_bytes: int,
         *,
+        ffmpeg_binary: str = "ffmpeg",
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.project_service = project_service
         self.cookie_store = cookie_store
         self.media_registry = media_registry
         self.max_bytes = max_bytes
+        self.ffmpeg_binary = ffmpeg_binary
         self.transport = transport
 
     async def extract(
@@ -82,7 +93,10 @@ class CanvasMediaExtractionService:
                 "作品配乐",
                 self._mapping(self._mapping(payload.get("music")).get("audio")),
             ),
-            _ResolvedOutput("audio", "视频混合音频", self._mapping(payload.get("audio"))),
+            # The mixed track must come from the downloaded video container.
+            # Platform audio URLs commonly point to music-only assets and may
+            # omit narration, sound effects, or other sounds heard in the video.
+            _ResolvedOutput("audio", "视频混合音频", None),
         ]
         materialized, extraction_warnings = await self._materialize(
             project_id,
@@ -115,7 +129,9 @@ class CanvasMediaExtractionService:
             (output, self._resource(output.media)) for output in outputs
         ]
         unique_resources: dict[tuple[str, tuple[tuple[str, str], ...]], MediaResource] = {}
-        for _, resource in resolved:
+        for output, resource in resolved:
+            if output.kind == "audio":
+                continue
             if resource is not None:
                 unique_resources[self._resource_key(resource)] = resource
 
@@ -123,7 +139,28 @@ class CanvasMediaExtractionService:
             *(self._download(resource) for resource in unique_resources.values())
         )
         saved_assets: dict[tuple[str, tuple[tuple[str, str], ...]], dict[str, Any]] = {}
+        embedded_audio_asset: dict[str, Any] | None = None
         for (key, resource), (content, mime_type) in zip(unique_resources.items(), downloaded):
+            if resource.kind == "video":
+                extracted_audio = await asyncio.to_thread(
+                    self._extract_video_audio,
+                    content,
+                    mime_type,
+                )
+                content, mime_type = await asyncio.to_thread(
+                    self._remove_video_audio,
+                    content,
+                    mime_type,
+                )
+                if extracted_audio is not None:
+                    audio_content, audio_mime_type = extracted_audio
+                    embedded_audio_asset = await asyncio.to_thread(
+                        self.project_service.save_asset,
+                        project_id,
+                        f"{media_id}-video-audio{self._extension(audio_mime_type, 'audio')}",
+                        audio_mime_type,
+                        audio_content,
+                    )
             filename = f"{media_id}-{resource.kind}{self._extension(mime_type, resource.kind)}"
             saved_assets[key] = await asyncio.to_thread(
                 self.project_service.save_asset,
@@ -136,6 +173,21 @@ class CanvasMediaExtractionService:
         response: dict[str, dict[str, Any]] = {}
         warnings: list[str] = []
         for output, resource in resolved:
+            if output.kind == "audio":
+                response[output.kind] = {
+                    "kind": output.kind,
+                    "label": output.label,
+                    "available": embedded_audio_asset is not None,
+                    "asset": embedded_audio_asset,
+                    "message": (
+                        "已直接从原视频文件提取完整音轨，包含人声、配乐和音效"
+                        if embedded_audio_asset is not None
+                        else "原视频文件不包含可提取的音轨"
+                    ),
+                }
+                if embedded_audio_asset is None and resolved[0][1] is not None:
+                    warnings.append("原视频文件不包含可提取的音轨")
+                continue
             if resource is None:
                 response[output.kind] = {
                     "kind": output.kind,
@@ -151,20 +203,13 @@ class CanvasMediaExtractionService:
                 "label": output.label,
                 "available": True,
                 "asset": asset,
-                "message": "已保存到当前画布素材目录",
+                "message": (
+                    "已移除视频音轨并保存到当前画布素材目录"
+                    if output.kind == "video"
+                    else "已保存到当前画布素材目录"
+                ),
             }
 
-        music_resource = resolved[1][1]
-        audio_resource = resolved[2][1]
-        if (
-            music_resource is not None
-            and audio_resource is not None
-            and self._resource_key(music_resource) == self._resource_key(audio_resource)
-        ):
-            message = "平台返回的作品配乐与视频混合音频是同一条音轨，两个节点引用同一本地文件"
-            response["music"]["message"] = message
-            response["audio"]["message"] = message
-            warnings.append(message)
         return response, warnings
 
     def _resource(self, media: dict[str, Any] | None) -> MediaResource | None:
@@ -201,6 +246,132 @@ class CanvasMediaExtractionService:
             raise CanvasMediaExtractionError(f"下载{resource.kind}失败：{exc}") from exc
         fallback = "video/mp4" if resource.kind == "video" else "audio/mp4"
         return b"".join(chunks), content_type or fallback
+
+    def _remove_video_audio(self, content: bytes, mime_type: str) -> tuple[bytes, str]:
+        """Remux an extracted video without audio while preserving its video frames."""
+        container_mime = mime_type if mime_type in {"video/mp4", "video/webm"} else "video/mp4"
+        suffix = ".webm" if container_mime == "video/webm" else ".mp4"
+        started = time.perf_counter()
+        with tempfile.TemporaryDirectory(prefix="canvas-muted-video-") as temp_dir:
+            input_path = Path(temp_dir) / f"input{suffix}"
+            output_path = Path(temp_dir) / f"output{suffix}"
+            input_path.write_bytes(content)
+            command = [
+                self.ffmpeg_binary,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(input_path),
+                "-map",
+                "0:v:0",
+                "-c:v",
+                "copy",
+                "-an",
+                "-map_metadata",
+                "-1",
+            ]
+            if container_mime == "video/mp4":
+                command.extend(["-movflags", "+faststart"])
+            command.extend([str(output_path), "-y"])
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    check=False,
+                    timeout=120,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise CanvasMediaExtractionError(f"移除视频音轨失败：{exc}") from exc
+            if result.returncode != 0 or not output_path.is_file():
+                detail = result.stderr.decode("utf-8", errors="replace").strip()[-800:]
+                raise CanvasMediaExtractionError(
+                    f"移除视频音轨失败{f'：{detail}' if detail else ''}"
+                )
+            muted_content = output_path.read_bytes()
+        if not muted_content:
+            raise CanvasMediaExtractionError("移除视频音轨后文件为空")
+        if len(muted_content) > self.max_bytes:
+            raise CanvasMediaTooLargeError("无音轨视频超过画布素材大小限制")
+        logger.info(
+            "canvas.extract_media.video_muted input_bytes=%d output_bytes=%d "
+            "mime_type=%s elapsed_seconds=%.3f",
+            len(content),
+            len(muted_content),
+            container_mime,
+            time.perf_counter() - started,
+        )
+        return muted_content, container_mime
+
+    def _extract_video_audio(
+        self,
+        content: bytes,
+        mime_type: str,
+    ) -> tuple[bytes, str] | None:
+        """Extract the audio stream embedded in the exact downloaded video."""
+        try:
+            with av.open(BytesIO(content)) as container:
+                has_audio = any(stream.type == "audio" for stream in container.streams)
+        except (av.error.FFmpegError, OSError, ValueError) as exc:
+            raise CanvasMediaExtractionError(f"检查原视频音轨失败：{exc}") from exc
+        if not has_audio:
+            return None
+
+        container_mime = mime_type if mime_type in {"video/mp4", "video/webm"} else "video/mp4"
+        suffix = ".webm" if container_mime == "video/webm" else ".mp4"
+        started = time.perf_counter()
+        with tempfile.TemporaryDirectory(prefix="canvas-video-audio-") as temp_dir:
+            input_path = Path(temp_dir) / f"input{suffix}"
+            output_path = Path(temp_dir) / "audio.m4a"
+            input_path.write_bytes(content)
+            command = [
+                self.ffmpeg_binary,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(input_path),
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-map_metadata",
+                "-1",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+                "-y",
+            ]
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    check=False,
+                    timeout=120,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise CanvasMediaExtractionError(f"提取原视频音轨失败：{exc}") from exc
+            if result.returncode != 0 or not output_path.is_file():
+                detail = result.stderr.decode("utf-8", errors="replace").strip()[-800:]
+                raise CanvasMediaExtractionError(
+                    f"提取原视频音轨失败{f'：{detail}' if detail else ''}"
+                )
+            audio_content = output_path.read_bytes()
+        if not audio_content:
+            raise CanvasMediaExtractionError("从原视频提取的音轨为空")
+        if len(audio_content) > self.max_bytes:
+            raise CanvasMediaTooLargeError("从原视频提取的音轨超过画布素材大小限制")
+        logger.info(
+            "canvas.extract_media.video_audio_extracted input_bytes=%d output_bytes=%d "
+            "elapsed_seconds=%.3f",
+            len(content),
+            len(audio_content),
+            time.perf_counter() - started,
+        )
+        return audio_content, "audio/mp4"
 
     @staticmethod
     def _resource_key(resource: MediaResource) -> tuple[str, tuple[tuple[str, str], ...]]:

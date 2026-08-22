@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1180" viewBox="0 0 1500 1180" role="img" aria-labelledby="title desc">
+  <title id="title">轻量 MVP 数据库关系图</title>
+  <desc id="desc">用户、项目、素材、分析任务、积分和支付的核心 MySQL 表关系图。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px sans-serif; fill: #0f172a; }
+      .subtitle { font: 15px sans-serif; fill: #475569; }
+      .edge { fill: none; stroke: #64748b; stroke-width: 2; marker-end: url(#arrow); }
+      .edge-label { font: 13px sans-serif; fill: #475569; paint-order: stroke; stroke: #f8fafc; stroke-width: 5px; }
+      .card { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+      .header-user { fill: #2563eb; }
+      .header-content { fill: #059669; }
+      .header-task { fill: #7c3aed; }
+      .header-billing { fill: #d97706; }
+      .header { font: 700 17px sans-serif; fill: #ffffff; }
+      .field { font: 14px monospace; fill: #334155; }
+      .key { fill: #e0e7ff; }
+      .key-text { font: 700 11px sans-serif; fill: #3730a3; }
+      .note { font: 13px sans-serif; fill: #64748b; }
+      .legend { font: 13px sans-serif; fill: #334155; }
+    </style>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1500" height="1180"/>
+  <text class="title" x="48" y="52">轻量 MVP 数据库关系图</text>
+  <text class="subtitle" x="48" y="78">当前建议：MySQL 保存业务事实，MinIO 保存对象文件，Redis 仅作缓存；不包含 MQ / Outbox。</text>
+
+  <!-- relationships -->
+  <path class="edge" d="M170 340 V390"/><text class="edge-label" x="182" y="370">1:N 登录会话</text>
+  <path class="edge" d="M300 205 H370"/><text class="edge-label" x="312" y="195">1:N 项目</text>
+  <path class="edge" d="M500 350 V390"/><text class="edge-label" x="512" y="375">1:N 素材</text>
+  <path class="edge" d="M670 510 H720"/><text class="edge-label" x="676" y="500">输入素材</text>
+  <path class="edge" d="M670 230 H720"/><text class="edge-label" x="675" y="220">1:N 任务</text>
+  <path class="edge" d="M1030 300 H1100"/><text class="edge-label" x="1038" y="290">0:1 结果</text>
+  <path class="edge" d="M300 790 H370"/><text class="edge-label" x="312" y="780">1:N 通知</text>
+  <path class="edge" d="M670 810 H720"/><text class="edge-label" x="678" y="800">1:N 订单</text>
+  <path class="edge" d="M1030 815 H1100"/><text class="edge-label" x="1038" y="805">1:N 支付记录</text>
+  <path class="edge" d="M875 930 V965"/><text class="edge-label" x="886" y="953">任务 / 订单结算</text>
+  <path class="edge" d="M300 1040 H720"/><text class="edge-label" x="475" y="1030">用户拥有积分账本</text>
+
+  <!-- users -->
+  <g transform="translate(40 110)">
+    <rect class="card" width="260" height="230" rx="10"/>
+    <rect class="header-user" width="260" height="42" rx="10"/><rect class="header-user" y="30" width="260" height="12"/>
+    <text class="header" x="16" y="27">users（用户）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">email              UK</text>
+    <text class="field" x="16" y="124">password_hash</text><text class="field" x="16" y="150">status</text>
+    <text class="field" x="16" y="176">display_name</text><text class="field" x="16" y="202">created_at</text>
+  </g>
+  <g transform="translate(40 390)">
+    <rect class="card" width="260" height="205" rx="10"/>
+    <rect class="header-user" width="260" height="42" rx="10"/><rect class="header-user" y="30" width="260" height="12"/>
+    <text class="header" x="16" y="27">user_sessions（会话）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">user_id            FK</text>
+    <text class="field" x="16" y="124">device_id</text><text class="field" x="16" y="150">refresh_token_hash</text>
+    <text class="field" x="16" y="176">expires_at</text>
+  </g>
+  <g transform="translate(40 680)">
+    <rect class="card" width="260" height="170" rx="10"/>
+    <rect class="header-user" width="260" height="42" rx="10"/><rect class="header-user" y="30" width="260" height="12"/>
+    <text class="header" x="16" y="27">notifications（通知）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">user_id            FK</text>
+    <text class="field" x="16" y="124">type / payload</text><text class="field" x="16" y="150">read_at</text>
+  </g>
+
+  <!-- content -->
+  <g transform="translate(370 110)">
+    <rect class="card" width="300" height="240" rx="10"/>
+    <rect class="header-content" width="300" height="42" rx="10"/><rect class="header-content" y="30" width="300" height="12"/>
+    <text class="header" x="16" y="27">projects（项目）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">owner_id           FK</text>
+    <text class="field" x="16" y="124">name</text><text class="field" x="16" y="150">status</text>
+    <text class="field" x="16" y="176">created_at</text><text class="field" x="16" y="202">updated_at</text>
+  </g>
+  <g transform="translate(370 390)">
+    <rect class="card" width="300" height="240" rx="10"/>
+    <rect class="header-content" width="300" height="42" rx="10"/><rect class="header-content" y="30" width="300" height="12"/>
+    <text class="header" x="16" y="27">assets（素材元数据）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">project_id         FK</text>
+    <text class="field" x="16" y="124">owner_id           FK</text><text class="field" x="16" y="150">bucket</text>
+    <text class="field" x="16" y="176">object_key         UK</text><text class="field" x="16" y="202">content_type / size_bytes</text>
+  </g>
+  <g transform="translate(370 700)">
+    <rect class="card" width="300" height="205" rx="10"/>
+    <rect class="header-billing" width="300" height="42" rx="10"/><rect class="header-billing" y="30" width="300" height="12"/>
+    <text class="header" x="16" y="27">products（积分商品）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">product_type</text>
+    <text class="field" x="16" y="124">name</text><text class="field" x="16" y="150">price_amount</text>
+    <text class="field" x="16" y="176">credits_grant / enabled</text>
+  </g>
+
+  <!-- tasks -->
+  <g transform="translate(720 160)">
+    <rect class="card" width="310" height="280" rx="10"/>
+    <rect class="header-task" width="310" height="42" rx="10"/><rect class="header-task" y="30" width="310" height="12"/>
+    <text class="header" x="16" y="27">analysis_jobs（分析任务）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">project_id         FK</text>
+    <text class="field" x="16" y="124">input_asset_id     FK</text><text class="field" x="16" y="150">user_id            FK</text>
+    <text class="field" x="16" y="176">capability_code</text><text class="field" x="16" y="202">status</text>
+    <text class="field" x="16" y="228">credits_reserved</text><text class="field" x="16" y="254">idempotency_key</text>
+  </g>
+  <g transform="translate(1100 220)">
+    <rect class="card" width="300" height="205" rx="10"/>
+    <rect class="header-task" width="300" height="42" rx="10"/><rect class="header-task" y="30" width="300" height="12"/>
+    <text class="header" x="16" y="27">job_results（任务结果）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">job_id             FK, UK</text>
+    <text class="field" x="16" y="124">output_asset_id    FK</text><text class="field" x="16" y="150">result_payload</text>
+    <text class="field" x="16" y="176">completed_at</text>
+  </g>
+
+  <!-- billing -->
+  <g transform="translate(720 700)">
+    <rect class="card" width="310" height="230" rx="10"/>
+    <rect class="header-billing" width="310" height="42" rx="10"/><rect class="header-billing" y="30" width="310" height="12"/>
+    <text class="header" x="16" y="27">orders（订单）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">user_id            FK</text>
+    <text class="field" x="16" y="124">product_id         FK</text><text class="field" x="16" y="150">status / amount</text>
+    <text class="field" x="16" y="176">idempotency_key</text><text class="field" x="16" y="202">paid_at</text>
+  </g>
+  <g transform="translate(1100 700)">
+    <rect class="card" width="300" height="205" rx="10"/>
+    <rect class="header-billing" width="300" height="42" rx="10"/><rect class="header-billing" y="30" width="300" height="12"/>
+    <text class="header" x="16" y="27">payment_transactions（支付）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">order_id           FK</text>
+    <text class="field" x="16" y="124">provider</text><text class="field" x="16" y="150">provider_transaction_id UK</text>
+    <text class="field" x="16" y="176">status / created_at</text>
+  </g>
+  <g transform="translate(720 965)">
+    <rect class="card" width="310" height="180" rx="10"/>
+    <rect class="header-billing" width="310" height="42" rx="10"/><rect class="header-billing" y="30" width="310" height="12"/>
+    <text class="header" x="16" y="27">credit_ledger（积分账本）</text>
+    <text class="field" x="16" y="72">id                 PK</text><text class="field" x="16" y="98">user_id            FK</text>
+    <text class="field" x="16" y="124">entry_type / amount</text><text class="field" x="16" y="150">reference_type / reference_id</text>
+  </g>
+
+  <rect x="1080" y="1010" width="320" height="112" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text class="legend" x="1100" y="1040">关系说明</text><text class="legend" x="1100" y="1068">PK：主键　FK：外键　UK：唯一键</text>
+  <text class="legend" x="1100" y="1094">assets 只保存 MinIO 对象元数据，</text><text class="legend" x="1100" y="1114">不保存文件二进制内容。</text>
+</svg>

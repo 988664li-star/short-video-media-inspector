@@ -11,7 +11,7 @@ from backend.app.services.session import LoginCookieStore
 
 
 @pytest.mark.asyncio
-async def test_materialize_saves_media_and_reuses_identical_audio(tmp_path):
+async def test_materialize_extracts_video_audio_separately_from_platform_music(tmp_path):
     project_service = CanvasProjectService(
         tmp_path / "canvas.sqlite3",
         tmp_path / "canvas",
@@ -36,6 +36,8 @@ async def test_materialize_saves_media_and_reuses_identical_audio(tmp_path):
         1024,
         transport=httpx.MockTransport(respond),
     )
+    service._remove_video_audio = lambda content, mime_type: (content, mime_type)
+    service._extract_video_audio = lambda content, mime_type: (b"mixed-video-audio", "audio/mp4")
     outputs, warnings = await service._materialize(
         project["id"],
         "1234567890",
@@ -47,9 +49,11 @@ async def test_materialize_saves_media_and_reuses_identical_audio(tmp_path):
     )
 
     assert outputs["video"]["available"] is True
-    assert outputs["music"]["asset"]["id"] == outputs["audio"]["asset"]["id"]
-    assert len(project_service.list_assets(project["id"])) == 2
-    assert warnings == ["平台返回的作品配乐与视频混合音频是同一条音轨，两个节点引用同一本地文件"]
+    assert outputs["music"]["asset"]["id"] != outputs["audio"]["asset"]["id"]
+    assert outputs["audio"]["asset"]["filename"].endswith("-video-audio.m4a")
+    assert outputs["audio"]["message"] == "已直接从原视频文件提取完整音轨，包含人声、配乐和音效"
+    assert len(project_service.list_assets(project["id"])) == 3
+    assert warnings == []
 
 
 @pytest.mark.asyncio
@@ -80,4 +84,4 @@ async def test_materialize_keeps_unavailable_output_explicit(tmp_path):
     assert warnings == []
     assert outputs["video"]["available"] is False
     assert outputs["music"]["asset"] is None
-    assert outputs["audio"]["message"] == "平台没有返回可单独保存的视频混合音频"
+    assert outputs["audio"]["message"] == "原视频文件不包含可提取的音轨"

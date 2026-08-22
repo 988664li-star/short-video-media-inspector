@@ -20,6 +20,13 @@ from backend.app.services.shot_detection import ShotDetectionService
 from backend.app.services.siliconflow import SiliconFlowClient
 from backend.app.services.seedance import SeedanceWorkspaceService
 from backend.app.services.seedance.object_storage import SeedanceObjectStorage
+from backend.app.services.video_generation import VideoGenerationRegistry
+from backend.app.services.video_generation.providers import (
+    SeedanceProviderConfig,
+    SeedanceVideoProvider,
+    XiaoyunqueProviderConfig,
+    XiaoyunqueVideoProvider,
+)
 from backend.app.services.storyboard import StoryboardChunkService, StoryboardScriptService
 from backend.app.services.transcription import TranscriptionService
 
@@ -81,6 +88,7 @@ canvas_media_extraction_service = CanvasMediaExtractionService(
     cookie_store,
     media_registry,
     settings.canvas_asset_max_bytes,
+    ffmpeg_binary=settings.shot_detection_ffmpeg_binary,
 )
 canvas_video_service = CanvasVideoService(
     canvas_project_service,
@@ -93,14 +101,26 @@ canvas_replacement_analysis_service = CanvasReplacementAnalysisService(
     canvas_project_service,
     siliconflow_vision_client,
 )
+seedance_video_provider = SeedanceVideoProvider(SeedanceProviderConfig(
+    api_key=settings.seedance_api_key,
+    api_url=settings.seedance_api_url,
+    log_presigned_urls=settings.seedance_log_presigned_urls,
+))
+xiaoyunque_video_provider = XiaoyunqueVideoProvider(XiaoyunqueProviderConfig(
+    api_key=settings.xiaoyunque_api_key,
+    api_base_url=settings.xiaoyunque_api_base_url,
+))
+video_generation_registry = VideoGenerationRegistry([
+    seedance_video_provider,
+    xiaoyunque_video_provider,
+])
 canvas_replacement_task_service = CanvasReplacementTaskService(
     canvas_project_service,
     seedance_object_storage,
     CanvasReplacementVideoConfig(
-        api_key=settings.seedance_api_key,
-        api_url=settings.seedance_api_url,
         max_asset_bytes=settings.canvas_asset_max_bytes,
     ),
+    provider_registry=video_generation_registry,
 )
 
 

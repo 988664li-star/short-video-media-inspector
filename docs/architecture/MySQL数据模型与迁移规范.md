@@ -8,7 +8,7 @@
 user_db       用户、邮箱验证、角色、登录设备和会话
 project_db    项目、资产、AI 任务和结果索引
 billing_db    商品、订单、支付交易、积分账本、可选订阅
-platform_db   Outbox、已处理事件、通知（后续可拆分）
+platform_db   通知（后续可拆分）
 ```
 
 **禁止跨数据库外键。** 服务间只保存对方的 ID（如 `user_id`、`project_id`），由 API 或事件保证一致性。
@@ -181,7 +181,7 @@ erDiagram
 {environment}/user/{user_id}/project/{project_id}/{asset_id}/{filename}
 ```
 
-`analysis_jobs` 是异步任务的事实来源，不依赖 RabbitMQ 保留最终状态。
+`analysis_jobs` 是任务的事实来源，最终状态不依赖进程内缓存。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -191,7 +191,7 @@ erDiagram
 | `credits_reserved` | 创建时预扣的积分 |
 | `idempotency_key` | 用户与创建接口范围内唯一 |
 
-唯一索引：`(user_id, idempotency_key)`。Worker 写状态时使用乐观版本号或条件更新，避免重复消息并发处理。
+唯一索引：`(user_id, idempotency_key)`。任务状态更新使用乐观版本号或条件更新，避免并发请求重复处理。
 
 ### 3.4 `products`、`orders` 与 `payment_transactions`
 
@@ -223,7 +223,6 @@ erDiagram
 ```text
 INSERT analysis_jobs (PENDING)
 INSERT credit_ledger (CREDIT_RESERVE)
-INSERT outbox_events (analysis.requested)
 COMMIT
 ```
 
@@ -233,9 +232,7 @@ COMMIT
 
 | 表 | 用途 |
 | --- | --- |
-| `outbox_events` | 与业务状态同一 MySQL 事务写入，后台发布器投递 RabbitMQ 后标记已发布 |
-| `processed_events` | 消费端以 `event_id + consumer_name` 去重，实现至少一次投递下的业务幂等 |
-| `notifications` | 用户可查询的站内通知；MQ 消息本身不作为通知历史 |
+| `notifications` | 用户可查询的站内通知，不作为任务状态的唯一来源 |
 
 ## 4. 状态机和更新约束
 

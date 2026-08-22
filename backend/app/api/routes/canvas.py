@@ -1,5 +1,6 @@
 """API endpoints for persistent infinite-canvas projects."""
 
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -23,6 +24,7 @@ from backend.app.schemas.requests import (
     CanvasReplacementTaskRefreshRequest,
     CanvasReplacementTaskSubmitRequest,
     CanvasVideoAssetRequest,
+    CanvasVideoComparisonRequest,
     CanvasProjectCreateRequest,
     CanvasProjectUpdateRequest,
     CanvasTextGenerateRequest,
@@ -39,12 +41,14 @@ from backend.app.services.canvas_projects import (
     CanvasProjectNotFoundError,
     CanvasProjectService,
     CanvasReplacementAnalysisError,
+    CanvasReplacementAnalysisProviderError,
     CanvasReplacementAnalysisService,
     CanvasReplacementTaskError,
     CanvasReplacementTaskService,
 )
 
 
+logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
 CanvasProjectDependency = Annotated[CanvasProjectService, Depends(get_canvas_project_service)]
 CanvasAIDependency = Annotated[CanvasAIService, Depends(get_canvas_ai_service)]
@@ -65,6 +69,13 @@ def _not_found(project_id: str) -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"画布不存在：{project_id}",
     )
+
+
+@router.get("/video-models")
+def list_video_models(
+    replacement_service: CanvasReplacementTaskDependency,
+) -> dict[str, Any]:
+    return {"models": replacement_service.available_models()}
 
 
 @router.get("/projects")
@@ -112,6 +123,12 @@ async def generate_text(
     service: CanvasProjectDependency,
     ai_service: CanvasAIDependency,
 ) -> dict[str, Any]:
+    logger.info(
+        "canvas.generate_text.request project_id=%s prompt=%r context=%r",
+        project_id,
+        request.prompt,
+        request.context,
+    )
     try:
         service.get_project(project_id)
         return await ai_service.generate_text(request.prompt, request.context)
@@ -128,6 +145,15 @@ async def generate_image(
     service: CanvasProjectDependency,
     ai_service: CanvasAIDependency,
 ) -> dict[str, Any]:
+    logger.info(
+        "canvas.generate_image.request project_id=%s prompt=%r source_url=%r "
+        "source_asset_ids=%s aspect_ratio=%s",
+        project_id,
+        request.prompt,
+        request.source_url,
+        request.source_asset_ids,
+        request.aspect_ratio,
+    )
     try:
         service.get_project(project_id)
         result = await ai_service.generate_image(
@@ -251,6 +277,31 @@ async def extract_video_keyframes(
     }
 
 
+@router.post("/projects/{project_id}/video-comparisons")
+async def compose_video_comparison(
+    project_id: str,
+    request: CanvasVideoComparisonRequest,
+    service: CanvasProjectDependency,
+    video_service: CanvasVideoDependency,
+) -> dict[str, Any]:
+    try:
+        service.get_project(project_id)
+        result = await video_service.compose_comparison(
+            project_id,
+            video_asset_ids=request.video_asset_ids,
+            audio_asset_id=request.audio_asset_id,
+        )
+    except CanvasProjectNotFoundError as exc:
+        raise _not_found(project_id) from exc
+    except CanvasVideoError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    asset = result["asset"]
+    return {
+        **result,
+        "asset": {**asset, "url": f"/api/canvas/projects/{project_id}/assets/{asset['id']}"},
+    }
+
+
 @router.post("/projects/{project_id}/replacement-analysis")
 async def analyze_replaceable_subjects(
     project_id: str,
@@ -263,9 +314,12 @@ async def analyze_replaceable_subjects(
         result = await analysis_service.analyze(
             project_id,
             [shot.model_dump() for shot in request.shots],
+            source_context=request.source_context,
         )
     except CanvasProjectNotFoundError as exc:
         raise _not_found(project_id) from exc
+    except CanvasReplacementAnalysisProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except CanvasReplacementAnalysisError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return {
@@ -299,6 +353,7 @@ def build_replacement_prompts(
             target_asset_ids=request.target_asset_ids,
             shots=[shot.model_dump() for shot in request.shots],
             actions=[action.model_dump() for action in request.actions],
+            subjects=[subject.model_dump() for subject in request.subjects],
         )
     except CanvasProjectNotFoundError as exc:
         raise _not_found(project_id) from exc
@@ -323,11 +378,29 @@ async def submit_replacement_tasks(
             shots=[shot.model_dump() for shot in request.shots],
             prompts=[prompt.model_dump() for prompt in request.prompts],
         )
+        service.record_replacement_submission(
+            project_id,
+            task_node_id=request.task_node_id,
+            output_node_id=request.output_shot_collection_node_id,
+            shots=[shot.model_dump() for shot in request.shots],
+            results=results,
+        )
+        logger.info(
+            "canvas.video.replacement.persisted project_id=%s task_node_id=%s "
+            "output_node_id=%s shot_indices=%s",
+            project_id,
+            request.task_node_id,
+            request.output_shot_collection_node_id,
+            [result.get("shot_index") for result in results],
+        )
     except CanvasProjectNotFoundError as exc:
         raise _not_found(project_id) from exc
     except CanvasReplacementTaskError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-    return {"results": [_replacement_result_with_url(project_id, item) for item in results]}
+    return {
+        "output_shot_collection_node_id": request.output_shot_collection_node_id,
+        "results": [_replacement_result_with_url(project_id, item) for item in results],
+    }
 
 
 @router.post("/projects/{project_id}/replacement-tasks/refresh")
@@ -341,10 +414,19 @@ async def refresh_replacement_task(
         service.get_project(project_id)
         result = await replacement_service.refresh(
             project_id,
+            model=request.model,
             provider_task_id=request.provider_task_id,
             shot=request.shot.model_dump(),
             existing_result_asset_id=request.result_asset_id,
         )
+        if request.task_node_id and request.output_shot_collection_node_id:
+            service.record_replacement_submission(
+                project_id,
+                task_node_id=request.task_node_id,
+                output_node_id=request.output_shot_collection_node_id,
+                shots=[request.shot.model_dump()],
+                results=[result],
+            )
     except CanvasProjectNotFoundError as exc:
         raise _not_found(project_id) from exc
     except CanvasReplacementTaskError as exc:

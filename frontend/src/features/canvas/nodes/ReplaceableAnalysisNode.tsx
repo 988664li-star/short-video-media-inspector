@@ -37,7 +37,7 @@ export function ReplaceableAnalysisNode({ id, data, selected }: NodeProps<Canvas
       <section className="canvas-replaceable-analysis nodrag nowheel">
         <header>
           <strong>识别到 {objects.length} 个主要主体</strong>
-          <span>{node.analysis_keyframes?.length ?? 0} 张片段分镜图</span>
+          <span>可连续选择，加入同一次替换</span>
         </header>
         {node.analysis_keyframes?.length ? <details className="canvas-replaceable-analysis__storyboards">
           <summary>查看时序分镜图</summary>
@@ -67,14 +67,14 @@ export function ReplaceableAnalysisNode({ id, data, selected }: NodeProps<Canvas
                 <div className="canvas-replaceable-analysis__type">{kindIcon(object.kind)} {kindLabel(object.kind)}</div>
                 <strong title={object.description || object.name}>{object.name}</strong>
                 <p>出现于 {object.shot_indices.map((index) => String(index).padStart(2, "0")).join("、")} 片段</p>
-                <button type="button" onClick={() => createReplacementTask(id, object.id)}>替换此对象</button>
+                <button type="button" title="加入当前视频的同一个多主体替换任务" onClick={() => createReplacementTask(id, object.id)}>加入替换任务</button>
               </article>
             ))}
           </div> : <div className="canvas-replaceable-analysis__shot-list">
             {shots.map(([shotIndex, shotObjects]) => (
               <article key={shotIndex}>
                 <strong>片段 {String(shotIndex).padStart(2, "0")}</strong>
-                <div>{shotObjects.map((object) => <button key={object.id} type="button" title={`创建${object.name}的替换任务`} onClick={() => createReplacementTask(id, object.id)}>
+                <div>{shotObjects.map((object) => <button key={object.id} type="button" title={`将${object.name}加入同一个替换任务`} onClick={() => createReplacementTask(id, object.id)}>
                   {kindIcon(object.kind)} {object.name}
                 </button>)}</div>
               </article>

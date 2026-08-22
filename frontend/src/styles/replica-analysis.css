@@ -62,31 +62,49 @@
 .canvas-ai-composer__current { padding-left: .55rem; border-left: 1px solid #3a4d62; color: #a8bed2; }
 .canvas-ai-composer__url { display: flex; align-items: center; gap: .45rem; padding: 0 .15rem; color: #79bbdf; }
 .canvas-ai-composer__url input { min-width: 0; flex: 1; height: 1.85rem; border: 0; outline: 0; background: transparent; color: #eaf4fc; font: var(--text-xs) var(--font-sans); }
-.canvas-ai-composer__workspace { position: relative; display: grid; min-height: 8rem; gap: .55rem; padding: .15rem 0; }
-.canvas-ai-composer textarea { box-sizing: border-box; width: 100%; min-height: 5.7rem; padding: .45rem .2rem; border: 0; outline: 0; resize: vertical; background: transparent; color: #f0f6fc; font: var(--text-sm)/1.65 var(--font-sans); }
+.canvas-ai-composer__workspace { position: relative; height: 8rem; padding: .15rem 0; }
+.canvas-ai-composer__prompt-editor { display: block; width: 100%; min-width: 0; box-sizing: border-box; min-height: 7.25rem; padding: .35rem .15rem; outline: 0; color: #f0f6fc; font: var(--text-sm)/1.65 var(--font-sans); overflow-wrap: anywhere; white-space: pre-wrap; writing-mode: horizontal-tb; }
+.canvas-ai-composer__prompt-editor > div, .canvas-ai-composer__prompt-editor > p { display: inline; }
+.canvas-ai-composer__prompt-editor:focus, .canvas-ai-composer__prompt-editor:focus-visible { outline: 0; box-shadow: none; }
+.canvas-ai-composer__prompt-placeholder { position: absolute; top: .5rem; left: .15rem; color: #657b91; pointer-events: none; }
+.canvas-ai-composer__inline-attachment { position: relative; flex: 0 0 1.45rem; width: 1.45rem; height: 1.45rem; overflow: hidden; border: 1px solid #4d657c; border-radius: .3rem; background: #0a111b; color: #d7e8f8; }
+.canvas-ai-composer__inline-attachment { display: inline-block; vertical-align: text-bottom; margin: 0 .18rem; }
+.canvas-ai-composer__inline-attachment img { width: 100%; height: 100%; object-fit: cover; }
+.canvas-ai-composer__inline-attachment > svg { width: .8rem; height: .8rem; margin: .4rem; }
+.canvas-ai-composer__inline-attachment button { position: absolute; top: -.28rem; right: -.28rem; display: grid; width: .85rem; height: .85rem; place-items: center; padding: 0; border: 1px solid #4d657c; border-radius: 999px; background: #101c2a; color: #d7e8f8; cursor: pointer; }
+.canvas-ai-composer__inline-attachment button:hover { border-color: #ff858e; color: #ffb2b8; }
+.canvas-ai-composer__inline-attachment button svg { width: .5rem; height: .5rem; }
 .canvas-ai-composer textarea::placeholder, .canvas-ai-composer input::placeholder { color: #657b91; }
-.canvas-ai-composer__attachments { display: flex; align-items: center; gap: .45rem; min-height: 3.55rem; overflow-x: auto; padding: 0 .05rem; }
-.canvas-ai-composer__attachment { position: relative; flex: 0 0 auto; width: 3.4rem; height: 3.4rem; overflow: hidden; padding: 0; border: 1px solid #4d657c; border-radius: .6rem; background: #0a111b; color: #d7e8f8; cursor: pointer; }
-.canvas-ai-composer__attachment:hover { border-color: #ff858e; }
-.canvas-ai-composer__attachment img { width: 100%; height: 100%; object-fit: cover; }
-.canvas-ai-composer__attachment > svg:first-child { width: 1.1rem; height: 1.1rem; margin: 1.1rem; }
-.canvas-ai-composer__attachment > svg:last-child { position: absolute; top: .2rem; right: .2rem; width: .75rem; height: .75rem; padding: .16rem; border-radius: 999px; background: rgb(5 10 17 / 82%); }
-.canvas-ai-composer__mention-menu { position: absolute; z-index: 3; bottom: .4rem; left: 0; display: grid; width: min(19rem, 88%); max-height: 12rem; overflow-y: auto; padding: .35rem; border: 1px solid #40566d; border-radius: .75rem; background: #121f2f; box-shadow: 0 16px 38px rgb(0 0 0 / 42%); }
+.canvas-ai-composer__attachments { display: flex; align-items: flex-start; gap: .5rem; min-height: 4.7rem; overflow-x: auto; padding: 0 .05rem; }
+.canvas-ai-composer__attachment { display: grid; flex: 0 0 3.75rem; gap: .22rem; min-width: 0; }
+.canvas-ai-composer__attachment-preview { position: relative; width: 3.4rem; height: 3.4rem; overflow: hidden; padding: 0; border: 1px solid #4d657c; border-radius: .6rem; background: #0a111b; color: #d7e8f8; cursor: pointer; }
+.canvas-ai-composer__attachment-preview:hover { border-color: #ff858e; }
+.canvas-ai-composer__attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
+.canvas-ai-composer__attachment-preview > svg:first-child { width: 1.1rem; height: 1.1rem; margin: 1.1rem; }
+.canvas-ai-composer__attachment-preview > svg:last-child { position: absolute; top: .2rem; right: .2rem; width: .75rem; height: .75rem; padding: .16rem; border-radius: 999px; background: rgb(5 10 17 / 82%); }
+.canvas-ai-composer__attachment-label { display: flex; min-width: 0; align-items: center; gap: .12rem; color: #a9cce5; font: 600 var(--text-2xs) var(--font-sans); white-space: nowrap; }
+.canvas-ai-composer__attachment-label svg { width: .7rem; height: .7rem; flex: 0 0 auto; }
+.canvas-ai-composer__attachment-label input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }
+.canvas-ai-composer__attachment-label input::placeholder { color: #7f9ab0; }
+.canvas-ai-composer__mention-menu { position: absolute; z-index: 3; top: .4rem; left: 0; display: grid; width: min(19rem, 88%); max-height: calc(100% - .8rem); box-sizing: border-box; overflow-y: auto; padding: .35rem; border: 1px solid #40566d; border-radius: .75rem; background: #121f2f; box-shadow: 0 16px 38px rgb(0 0 0 / 42%); }
 .canvas-ai-composer__mention-menu button { display: flex; min-height: 2.7rem; align-items: center; gap: .5rem; padding: .35rem; border: 0; border-radius: .5rem; background: transparent; color: #dceafa; font: 600 var(--text-xs) var(--font-sans); text-align: left; cursor: pointer; }
 .canvas-ai-composer__mention-menu button:hover { background: #26394d; }
 .canvas-ai-composer__mention-menu img { width: 2rem; height: 2rem; border-radius: .35rem; object-fit: cover; }
 .canvas-ai-composer__mention-menu button > svg { width: 1.1rem; height: 1.1rem; margin: .45rem; color: #8ec8ec; }
+.canvas-ai-composer__mention-menu button span { display: grid; min-width: 0; gap: .08rem; }
+.canvas-ai-composer__mention-menu button strong, .canvas-ai-composer__mention-menu button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-ai-composer__mention-menu button small { color: #8096aa; font: 500 var(--text-2xs) var(--font-sans); }
 .canvas-ai-composer__mention-menu p { margin: .4rem; color: #8398ad; font-size: var(--text-2xs); line-height: 1.5; }
-.canvas-ai-composer__tools { display: flex; min-height: 2.4rem; align-items: center; gap: .1rem; border-top: 1px solid #2e4054; padding-top: .45rem; }
+.canvas-ai-composer__tools { display: flex; width: 100%; min-width: 0; min-height: 2.4rem; box-sizing: border-box; align-items: center; gap: .05rem; overflow: hidden; border-top: 1px solid #2e4054; padding-top: .45rem; }
 .canvas-ai-composer__tools > input { display: none; }
-.canvas-ai-composer__tools button, .canvas-ai-composer__tools label { display: inline-flex; min-height: 2rem; align-items: center; gap: .32rem; padding: 0 .48rem; border: 0; border-radius: .5rem; background: transparent; color: #b6c7d8; font: 600 var(--text-2xs) var(--font-sans); cursor: pointer; white-space: nowrap; }
+.canvas-ai-composer__tools button, .canvas-ai-composer__tools label { display: inline-flex; min-width: 0; min-height: 2rem; align-items: center; gap: .28rem; padding: 0 .4rem; border: 0; border-radius: .5rem; background: transparent; color: #b6c7d8; font: 600 var(--text-2xs) var(--font-sans); cursor: pointer; white-space: nowrap; }
 .canvas-ai-composer__tools button:hover:not(:disabled), .canvas-ai-composer__tools label:hover { background: #26384b; color: #fff; }
 .canvas-ai-composer__tools button:disabled { cursor: wait; opacity: .55; }
 .canvas-ai-composer__tools svg { width: .9rem; height: .9rem; }
 .canvas-ai-composer__tools label { max-width: 10rem; }
 .canvas-ai-composer__tools label select { min-width: 0; max-width: 8.2rem; height: 2rem; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-overflow: ellipsis; }
 .canvas-ai-composer__tools label:has(select[aria-label="画面比例"]), .canvas-ai-composer__tools label:has(select[aria-label="生成清晰度"]), .canvas-ai-composer__tools label:has(select[aria-label="角色设计模式"]) { padding: 0 .36rem; }
-.canvas-ai-composer__submit { min-width: 5.9rem; justify-content: center; margin-left: auto; background: linear-gradient(135deg, #ff6974, #ff5361) !important; color: #fff !important; box-shadow: 0 7px 18px rgb(255 73 86 / 22%); }
+.canvas-ai-composer__submit { min-width: 5.9rem !important; flex: 0 0 5.9rem; justify-content: center; margin-left: auto; background: linear-gradient(135deg, #ff6974, #ff5361) !important; color: #fff !important; box-shadow: 0 7px 18px rgb(255 73 86 / 22%); }
 .canvas-ai-composer__message { margin: 0; padding: 0 .2rem; font-size: var(--text-2xs); line-height: 1.45; }
 .canvas-ai-composer__message--error { color: #ff9ba2; }
 .canvas-ai-composer__message--success { color: #72d8af; }

@@ -22,6 +22,23 @@ HYDRATION_PATTERN = re.compile(
 )
 
 
+def _parse_hydration(raw: str) -> dict[str, Any]:
+    """Parse TikTok hydration JSON without corrupting entities inside strings."""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as raw_error:
+        decoded = html.unescape(raw)
+        if decoded == raw:
+            raise RuntimeError("TikTok 页面数据格式异常") from raw_error
+        try:
+            payload = json.loads(decoded)
+        except json.JSONDecodeError as decoded_error:
+            raise RuntimeError("TikTok 页面数据格式异常") from decoded_error
+    if not isinstance(payload, dict):
+        raise RuntimeError("TikTok 页面数据格式异常")
+    return payload
+
+
 def _url(value: Any) -> str | None:
     if isinstance(value, str) and value.startswith(("http://", "https://")):
         return value
@@ -48,10 +65,7 @@ async def _fetch_item(share_url: str) -> tuple[dict[str, Any], str, str]:
     match = HYDRATION_PATTERN.search(response.text)
     if not match:
         raise RuntimeError("TikTok 页面未返回公开作品数据，可能受地区限制或作品不可见")
-    try:
-        scope = json.loads(html.unescape(match.group(1))).get("__DEFAULT_SCOPE__") or {}
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("TikTok 页面数据格式异常") from exc
+    scope = _parse_hydration(match.group(1)).get("__DEFAULT_SCOPE__") or {}
     detail = scope.get("webapp.video-detail") or {}
     item = (detail.get("itemInfo") or {}).get("itemStruct") or {}
     if not item.get("id"):

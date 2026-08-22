@@ -16,8 +16,10 @@ from uuid import uuid4
 from minio import Minio
 from minio.error import S3Error
 
+from backend.app.services.video_generation import VideoAssetPublisherError
 
-class ObjectStorageError(RuntimeError):
+
+class ObjectStorageError(VideoAssetPublisherError):
     pass
 
 

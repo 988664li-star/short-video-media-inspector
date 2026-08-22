@@ -1,4 +1,4 @@
-import { Frame, LoaderCircle, Scissors } from "lucide-react";
+import { Columns3, Frame, LoaderCircle, Scissors } from "lucide-react";
 import { NodeToolbar, Position } from "@xyflow/react";
 
 import type { CanvasNode } from "../../../types/canvas";
@@ -11,11 +11,22 @@ interface VideoNodeCapabilitiesProps {
 }
 
 export function VideoNodeCapabilities({ id, node, selected }: VideoNodeCapabilitiesProps) {
-  const { extractVideoKeyframes, splitVideoByShots, videoAction } = useCanvasNodeActions();
+  const {
+    composeVideoComparison,
+    extractVideoKeyframes,
+    getUpstreamNodes,
+    splitVideoByShots,
+    videoAction,
+  } = useCanvasNodeActions();
   const busy = videoAction?.nodeId === id;
   const splitting = videoAction?.nodeId === id && videoAction.type === "split";
   const extracting = videoAction?.nodeId === id && videoAction.type === "keyframes";
+  const comparing = videoAction?.nodeId === id && videoAction.type === "compare";
   const ready = Boolean(node.asset_id && node.asset_url);
+  const upstreamVideoCount = new Set(getUpstreamNodes(id)
+    .filter((source) => source.kind === "video" && source.asset_id)
+    .map((source) => source.asset_id)).size;
+  const comparisonReady = upstreamVideoCount >= 2 && upstreamVideoCount <= 3;
 
   return (
     <NodeToolbar
@@ -25,6 +36,16 @@ export function VideoNodeCapabilities({ id, node, selected }: VideoNodeCapabilit
       align="center"
       offset={16}
     >
+      <button
+        type="button"
+        disabled={!comparisonReady || busy}
+        title={comparisonReady
+          ? `将已连接的 ${upstreamVideoCount} 个视频并排同步合成；优先使用连接的音频，否则使用第一个有音轨的视频`
+          : "请连接 2～3 个不同的视频素材"}
+        onClick={() => void composeVideoComparison(id)}
+      >
+        {comparing ? <LoaderCircle className="spin" /> : <Columns3 />} 生成对比视频
+      </button>
       <button
         type="button"
         disabled={!ready || busy}

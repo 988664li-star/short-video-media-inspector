@@ -10,7 +10,11 @@ from .extraction import (
     CanvasMediaTooLargeError,
 )
 from .video import CanvasVideoError, CanvasVideoService
-from .replacement import CanvasReplacementAnalysisError, CanvasReplacementAnalysisService
+from .replacement import (
+    CanvasReplacementAnalysisError,
+    CanvasReplacementAnalysisProviderError,
+    CanvasReplacementAnalysisService,
+)
 from .prompts import CanvasPromptTemplateError, CanvasPromptTemplates
 from .replacement_tasks import (
     CanvasReplacementTaskError,
@@ -31,6 +35,7 @@ __all__ = [
     "CanvasVideoError",
     "CanvasVideoService",
     "CanvasReplacementAnalysisError",
+    "CanvasReplacementAnalysisProviderError",
     "CanvasReplacementAnalysisService",
     "CanvasPromptTemplateError",
     "CanvasPromptTemplates",

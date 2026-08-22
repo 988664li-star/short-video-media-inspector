@@ -57,7 +57,7 @@ export function CanvasNodeComposerToolbar({
       position={Position.Bottom}
       align={toolbarAlign}
       offset={16}
-      style={{ maxHeight: availablePanelHeight, overflowY: "auto" }}
+      style={{ maxHeight: availablePanelHeight, overflowX: "hidden", overflowY: "auto" }}
     >
       <CanvasNodeComposer
         nodeId={id}
