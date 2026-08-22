@@ -1,4 +1,4 @@
-请归并下面的逐片段视觉观察。只使用输入中已有的 observation_id，不得新增主体或片段关系：
+请将下面的逐片段视觉观察归并为最多 4 个用户可替换主体。只使用输入中已有的 `observation_id`；可以省略低价值观察，不得新增主体或伪造片段关系。
 
 $observations_json
 
@@ -7,10 +7,10 @@ $observations_json
 {
   "groups": [
     {
-      "observation_ids": ["shot-1-object-1", "shot-2-object-2"],
+      "observation_ids": ["shot-1-object-1", "shot-2-object-1"],
       "kind": "product",
-      "name": "统一后的保守主体名称",
-      "description": "基于这些观察归纳的主体作用和实际可见范围"
+      "name": "保温杯（含杯盖与吸管）",
+      "description": "主要产品：跨片段展示的完整商品，已合并其颜色、角度和固有组件。"
     }
   ]
 }

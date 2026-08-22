@@ -22,6 +22,8 @@ class CanvasPromptTemplates:
     replacement_analysis_user: str
     replacement_analysis_merge_system: str
     replacement_analysis_merge_user: Template
+    replacement_video_prompt_system: str
+    replacement_video_prompt_user: Template
     shot_replacement_video: Template
     multi_shot_replacement_video: Template
 
@@ -40,6 +42,12 @@ class CanvasPromptTemplates:
                 ).read_text(encoding="utf-8").strip(),
                 "replacement_analysis_merge_user": Template(
                     (directory / "replacement_analysis_merge_user.md").read_text(encoding="utf-8").strip()
+                ),
+                "replacement_video_prompt_system": (
+                    directory / "replacement_video_prompt_system.md"
+                ).read_text(encoding="utf-8").strip(),
+                "replacement_video_prompt_user": Template(
+                    (directory / "replacement_video_prompt_user.md").read_text(encoding="utf-8").strip()
                 ),
                 "shot_replacement_video": Template(
                     (directory / "shot_replacement_video.md").read_text(encoding="utf-8").strip()
@@ -61,6 +69,20 @@ class CanvasPromptTemplates:
             )
         except (KeyError, ValueError) as exc:
             raise CanvasPromptTemplateError("主体跨片段归并提示词模板参数不完整") from exc
+
+    def render_replacement_video_prompt(
+        self,
+        *,
+        shot_context_json: str,
+        subjects_json: str,
+    ) -> str:
+        try:
+            return self.replacement_video_prompt_user.substitute(
+                shot_context_json=shot_context_json,
+                subjects_json=subjects_json,
+            )
+        except (KeyError, ValueError) as exc:
+            raise CanvasPromptTemplateError("逐镜头多模态提示词模板参数不完整") from exc
 
     def render_shot_replacement_video(
         self,

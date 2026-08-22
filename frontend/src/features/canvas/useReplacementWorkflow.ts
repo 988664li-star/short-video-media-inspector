@@ -485,7 +485,7 @@ export function useReplacementWorkflow({
       updateOperation(nodeId, { status: "failed", error: "请先为所有已选镜头生成并审核视频指令" });
       return;
     }
-    if (prompts.some((prompt) => prompt.input_revision !== 3)) {
+    if (prompts.some((prompt) => prompt.input_revision !== 5)) {
       updateOperation(nodeId, { status: "failed", error: "视频编辑指令使用的是旧结构。请点击“生成视频编辑指令”重新构建后再提交。" });
       return;
     }

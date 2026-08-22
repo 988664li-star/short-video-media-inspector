@@ -189,7 +189,7 @@ class CanvasReplaceableObjectRequest(StrictRequest):
 class CanvasReplacementShotPromptRequest(StrictRequest):
     shot_index: int = Field(ge=1, le=10_000)
     prompt: str = Field(default="", max_length=8_000)
-    input_revision: int = Field(default=0, ge=0, le=3)
+    input_revision: int = Field(default=0, ge=0, le=5)
     status: Literal["pending", "ready", "queued", "running", "succeeded", "failed"] = "pending"
     provider_task_id: str = Field(default="", max_length=160)
     result_asset_id: str = Field(default="", max_length=64, pattern=r"^[a-f0-9]{32}$|^$")
@@ -382,7 +382,7 @@ class CanvasReplacementTaskSubmitRequest(StrictRequest):
     def require_confirmation(self) -> "CanvasReplacementTaskSubmitRequest":
         if not self.confirmed:
             raise ValueError("请确认本次逐镜头视频生成可能产生费用")
-        if any(item.input_revision != 3 for item in self.prompts):
+        if any(item.input_revision != 5 for item in self.prompts):
             raise ValueError("视频编辑指令使用的是旧结构，请重新生成视频编辑指令后再提交")
         return self
 

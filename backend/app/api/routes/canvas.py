@@ -338,7 +338,7 @@ async def analyze_replaceable_subjects(
 
 
 @router.post("/projects/{project_id}/replacement-prompts")
-def build_replacement_prompts(
+async def build_replacement_prompts(
     project_id: str,
     request: CanvasReplacementPromptBuildRequest,
     service: CanvasProjectDependency,
@@ -346,7 +346,8 @@ def build_replacement_prompts(
 ) -> dict[str, Any]:
     try:
         service.get_project(project_id)
-        prompts = replacement_service.build_prompts(
+        prompts = await replacement_service.build_prompts(
+            project_id=project_id,
             source_object_name=request.source_object_name,
             source_object_description=request.source_object_description,
             target_description=request.target_description,

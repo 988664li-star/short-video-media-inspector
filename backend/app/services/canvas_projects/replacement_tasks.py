@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
+from io import BytesIO
+import json
 import logging
 import math
 from pathlib import Path
@@ -13,6 +16,9 @@ from urllib.parse import urlsplit, urlunsplit
 
 import av
 import httpx
+from PIL import Image, ImageDraw
+
+from backend.app.services.siliconflow import SiliconFlowClient, SiliconFlowError
 
 from backend.app.services.video_generation import (
     VideoAssetPublisher,
@@ -32,6 +38,7 @@ logger = logging.getLogger("uvicorn.error")
 
 
 MAX_CONCURRENT_SUBMISSIONS = 3
+MAX_CONCURRENT_PROMPT_COMPOSITIONS = 3
 
 
 class CanvasReplacementTaskError(RuntimeError):
@@ -56,21 +63,24 @@ class CanvasReplacementTaskService:
         project_service: CanvasProjectService,
         object_storage: VideoAssetPublisher,
         config: CanvasReplacementVideoConfig,
+        vision_client: SiliconFlowClient,
         prompt_templates: CanvasPromptTemplates | None = None,
         provider_registry: VideoGenerationRegistry | None = None,
     ) -> None:
         self.project_service = project_service
         self.object_storage = object_storage
         self.config = config
+        self.vision_client = vision_client
         self.prompt_templates = prompt_templates
         self.provider_registry = provider_registry or VideoGenerationRegistry([])
 
     def available_models(self) -> list[dict[str, object]]:
         return self.provider_registry.catalog("subject_replace")
 
-    def build_prompts(
+    async def build_prompts(
         self,
         *,
+        project_id: str,
         source_object_name: str,
         source_object_description: str,
         target_description: str,
@@ -85,16 +95,9 @@ class CanvasReplacementTaskService:
             template = self.prompt_templates or CanvasPromptTemplates.load()
         except CanvasPromptTemplateError as exc:
             raise CanvasReplacementTaskError(str(exc)) from exc
-        action_by_shot = {
-            int(item["shot_index"]): str(item["description"])
-            for item in actions
-            if isinstance(item, dict) and isinstance(item.get("shot_index"), int)
-        }
-        image_references = self._image_references(len(target_asset_ids))
         prompt_subjects = subjects or []
-        subject_references: list[tuple[dict[str, Any], str]] = []
+        subject_references: list[tuple[dict[str, Any], list[str]]] = []
         if prompt_subjects:
-            next_image_index = 1
             ordered_subject_asset_ids: list[str] = []
             for subject in prompt_subjects:
                 subject_asset_ids = list(subject.get("target_asset_ids") or [])
@@ -104,75 +107,270 @@ class CanvasReplacementTaskService:
                     )
                 subject_references.append((
                     subject,
-                    self._image_reference_range(next_image_index, len(subject_asset_ids)),
+                    subject_asset_ids,
                 ))
                 ordered_subject_asset_ids.extend(subject_asset_ids)
-                next_image_index += len(subject_asset_ids)
             if ordered_subject_asset_ids != target_asset_ids:
                 raise CanvasReplacementTaskError(
                     "主体与目标图片的绑定顺序不一致，请重新生成视频编辑指令"
                 )
-            if next_image_index - 1 > 8:
+            if len(ordered_subject_asset_ids) > 8:
                 raise CanvasReplacementTaskError("一次多主体替换最多使用 8 张目标参考图")
-        prompts: list[dict[str, Any]] = []
-        for shot in sorted(shots, key=lambda item: int(item["index"])):
-            shot_index = int(shot["index"])
-            if subject_references:
-                replacement_items: list[str] = []
-                for subject, references in subject_references:
-                    subject_shot_indices = {
-                        int(index) for index in subject.get("shot_indices") or []
-                        if isinstance(index, int)
-                    }
-                    if subject_shot_indices and shot_index not in subject_shot_indices:
-                        continue
-                    subject_actions = {
-                        int(item["shot_index"]): str(item["description"])
-                        for item in subject.get("actions") or []
-                        if isinstance(item, dict) and isinstance(item.get("shot_index"), int)
-                    }
-                    subject_name = str(subject.get("source_object_name") or "源视频中的对象")
-                    subject_description = str(
-                        subject.get("source_object_description") or "源视频中的该对象"
-                    )
-                    target_description_item = str(
-                        subject.get("target_description")
-                        or "以绑定目标参考图片展示的外观、颜色、材质与结构为准"
-                    )
-                    shot_action_item = subject_actions.get(
-                        shot_index,
-                        f"{subject_name} 出现在当前连续片段中，保持原有位置、动作与遮挡关系。",
-                    )
-                    replacement_items.append(
-                        f"- 将视频中的“{subject_name}”（{subject_description}）全部替换为 "
-                        f"{references} 所示的目标对象。\n"
-                        f"  - 目标对象说明：{target_description_item}。\n"
-                        f"  - 当前片段中的出现状态：{shot_action_item}"
-                    )
-                if not replacement_items:
-                    continue
-                prompt = template.render_multi_shot_replacement_video(
-                    "\n".join(replacement_items)
+        else:
+            action_by_shot = {
+                int(item["shot_index"]): str(item["description"])
+                for item in actions
+                if isinstance(item, dict) and isinstance(item.get("shot_index"), int)
+            }
+            subject_references = [(
+                {
+                    "source_object_name": source_object_name,
+                    "source_object_description": source_object_description,
+                    "target_description": target_description,
+                    "actions": [
+                        {"shot_index": index, "description": description}
+                        for index, description in action_by_shot.items()
+                    ],
+                },
+                target_asset_ids,
+            )]
+
+        reference_images = await self._load_reference_images(project_id, target_asset_ids)
+        target_image_references = {
+            asset_id: f"@图片{index}"
+            for index, asset_id in enumerate(target_asset_ids, start=1)
+        }
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_PROMPT_COMPOSITIONS)
+
+        async def compose_shot(shot: dict[str, Any]) -> dict[str, Any]:
+            async with semaphore:
+                return await self._compose_multimodal_prompt(
+                    project_id=project_id,
+                    shot=shot,
+                    subject_references=subject_references,
+                    reference_images=reference_images,
+                    target_image_references=target_image_references,
+                    template=template,
                 )
-            else:
-                action = action_by_shot.get(
+
+        prompts = await asyncio.gather(*[
+            compose_shot(shot)
+            for shot in sorted(shots, key=lambda item: int(item["index"]))
+        ])
+        return list(prompts)
+
+    async def _compose_multimodal_prompt(
+        self,
+        *,
+        project_id: str,
+        shot: dict[str, Any],
+        subject_references: list[tuple[dict[str, Any], list[str]]],
+        reference_images: dict[str, dict[str, str]],
+        target_image_references: dict[str, str],
+        template: CanvasPromptTemplates,
+    ) -> dict[str, Any]:
+        shot_index = int(shot["index"])
+        active_subjects: list[dict[str, Any]] = []
+        for subject, asset_ids in subject_references:
+            shot_indices = {
+                int(index) for index in subject.get("shot_indices") or []
+                if isinstance(index, int)
+            }
+            if shot_indices and shot_index not in shot_indices:
+                continue
+            actions = {
+                int(item["shot_index"]): str(item["description"])
+                for item in subject.get("actions") or []
+                if isinstance(item, dict) and isinstance(item.get("shot_index"), int)
+            }
+            subject_name = str(subject.get("source_object_name") or "源视频中的对象")
+            active_subjects.append({
+                "source_object_name": subject_name,
+                "source_object_kind": str(subject.get("source_object_kind") or "product"),
+                "source_object_description": str(
+                    subject.get("source_object_description") or "源视频中的该对象"
+                ),
+                "target_description": str(
+                    subject.get("target_description")
+                    or "以绑定目标素材图片中可见的外观、颜色、材质与结构为准"
+                ),
+                "appearance_evidence": actions.get(
                     shot_index,
-                    f"{source_object_name} 出现在当前连续片段中，保持原有位置、动作与遮挡关系。",
-                )
-                prompt = template.render_shot_replacement_video(
-                    source_object_name=source_object_name,
-                    source_object_description=source_object_description,
-                    target_description=target_description,
-                    target_image_references=image_references,
-                    shot_action=action,
-                )
-            prompts.append({
-                "shot_index": shot_index,
-                "prompt": prompt,
-                "input_revision": 3,
-                "status": "ready",
+                    f"{subject_name} 出现在当前连续片段中；保持其原有位置、动作与遮挡关系。",
+                ),
+                "target_image_ids": asset_ids,
+                "target_image_names": [reference_images[asset_id]["filename"] for asset_id in asset_ids],
+                "seedance_target_images": [target_image_references[asset_id] for asset_id in asset_ids],
             })
-        return prompts
+        if not active_subjects:
+            raise CanvasReplacementTaskError(
+                f"片段 {shot_index:02d} 没有可替换主体，请调整替换范围后重试"
+            )
+
+        storyboard_data_uri = await asyncio.to_thread(
+            self._storyboard_data_uri, project_id, shot
+        )
+        shot_context = {
+            "shot_index": shot_index,
+            "duration_seconds": round(float(shot.get("duration_seconds") or 0), 2),
+            "source_video_name": str(shot.get("asset_name") or f"片段 {shot_index:02d}"),
+            "instruction": "原片段六宫格展示该连续视频的时间顺序；保持其时长、镜头顺序和运动。",
+        }
+        content: list[dict[str, Any]] = [{
+            "type": "text",
+            "text": template.render_replacement_video_prompt(
+                shot_context_json=json.dumps(shot_context, ensure_ascii=False),
+                subjects_json=json.dumps(active_subjects, ensure_ascii=False),
+            ),
+        }, {
+            "type": "text",
+            "text": "图片 1：原视频当前连续片段的六宫格分镜图。",
+        }, {
+            "type": "image_url",
+            "image_url": {"url": storyboard_data_uri, "detail": "high"},
+        }]
+        for subject in active_subjects:
+            for asset_id in subject["target_image_ids"]:
+                reference = reference_images[asset_id]
+                content.extend([{
+                    "type": "text",
+                    "text": (
+                        f"目标素材图：绑定源主体“{subject['source_object_name']}”，"
+                        f"文件名为“{reference['filename']}”。只能用于该主体。"
+                    ),
+                }, {
+                    "type": "image_url",
+                    "image_url": {"url": reference["data_uri"], "detail": "high"},
+                }])
+        try:
+            result, _ = await self.vision_client.complete_json(
+                system_prompt=template.replacement_video_prompt_system,
+                content=content,
+                max_tokens=2_048,
+                timeout_seconds=180,
+                temperature=0.1,
+                log_context=f"canvas.replacement.prompt.shot-{shot_index:02d}",
+            )
+        except SiliconFlowError as exc:
+            raise CanvasReplacementTaskError(
+                f"片段 {shot_index:02d} 的多模态提示词生成失败：{exc}"
+            ) from exc
+        prompt = str(result.get("prompt") or "").strip()
+        if not prompt:
+            raise CanvasReplacementTaskError(
+                f"片段 {shot_index:02d} 的多模态模型没有返回视频编辑指令"
+            )
+        warning = str(result.get("warning") or "").strip()
+        if warning:
+            logger.warning(
+                "canvas.video.replacement.prompt.warning project_id=%s shot_index=%02d warning=%s",
+                project_id,
+                shot_index,
+                warning,
+            )
+        return {
+            "shot_index": shot_index,
+            "prompt": prompt,
+            "input_revision": 5,
+            "status": "ready",
+        }
+
+    async def _load_reference_images(
+        self,
+        project_id: str,
+        asset_ids: list[str],
+    ) -> dict[str, dict[str, str]]:
+        references = await asyncio.gather(*[
+            asyncio.to_thread(self._reference_image_payload, project_id, asset_id)
+            for asset_id in dict.fromkeys(asset_ids)
+        ])
+        return {asset_id: reference for asset_id, reference in zip(dict.fromkeys(asset_ids), references)}
+
+    def _reference_image_payload(self, project_id: str, asset_id: str) -> dict[str, str]:
+        try:
+            asset, path = self.project_service.get_asset_file(project_id, asset_id)
+        except CanvasAssetNotFoundError as exc:
+            raise CanvasReplacementTaskError(f"目标素材不存在：{asset_id}") from exc
+        mime_type = str(asset.get("mime_type") or "").lower()
+        if mime_type not in {"image/jpeg", "image/jpg", "image/png", "image/webp"}:
+            raise CanvasReplacementTaskError(f"目标素材不是支持的图片格式：{asset.get('filename')}")
+        try:
+            image_bytes = path.read_bytes()
+        except OSError as exc:
+            raise CanvasReplacementTaskError(f"目标素材读取失败：{asset.get('filename')}") from exc
+        return {
+            "filename": str(asset.get("filename") or asset_id),
+            "data_uri": f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}",
+        }
+
+    def _storyboard_data_uri(self, project_id: str, shot: dict[str, Any]) -> str:
+        shot_index = int(shot["index"])
+        try:
+            asset, source_path = self.project_service.get_asset_file(
+                project_id, str(shot["asset_id"])
+            )
+        except CanvasAssetNotFoundError as exc:
+            raise CanvasReplacementTaskError(f"片段 {shot_index:02d} 的源视频不存在") from exc
+        if not str(asset.get("mime_type") or "").startswith("video/"):
+            raise CanvasReplacementTaskError(f"片段 {shot_index:02d} 不是视频素材")
+        try:
+            image_bytes = self._make_storyboard(source_path)
+        except (av.error.FFmpegError, IndexError, OSError) as exc:
+            raise CanvasReplacementTaskError(f"片段 {shot_index:02d} 的分镜图生成失败：{exc}") from exc
+        return f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode('ascii')}"
+
+    @staticmethod
+    def _make_storyboard(source_path: Path) -> bytes:
+        frame_count = 6
+        columns = 3
+        with av.open(str(source_path)) as container:
+            stream = container.streams.video[0]
+            duration = float(stream.duration * stream.time_base) if stream.duration else 0.0
+            targets = [duration * index / (frame_count - 1) for index in range(frame_count)]
+            selected: list[Image.Image] = []
+            target_index = 0
+            last_image: Image.Image | None = None
+            for frame in container.decode(stream):
+                timestamp = float(frame.time) if frame.time is not None else 0.0
+                image = frame.to_image().convert("RGB")
+                last_image = image
+                while target_index < len(targets) and timestamp >= targets[target_index]:
+                    selected.append(image.copy())
+                    target_index += 1
+            if last_image is not None:
+                selected.extend(last_image.copy() for _ in range(frame_count - len(selected)))
+        if not selected:
+            raise OSError("视频中没有可用画面")
+        first = selected[0]
+        tile_width = 360
+        tile_height = max(200, round(tile_width * first.height / first.width))
+        gutter = 8
+        label_height = 30
+        rows = math.ceil(frame_count / columns)
+        storyboard = Image.new(
+            "RGB",
+            (
+                columns * tile_width + (columns + 1) * gutter,
+                rows * (tile_height + label_height) + (rows + 1) * gutter,
+            ),
+            "#101722",
+        )
+        draw = ImageDraw.Draw(storyboard)
+        for index, source in enumerate(selected[:frame_count]):
+            image = source.copy()
+            image.thumbnail((tile_width, tile_height))
+            column = index % columns
+            row = index // columns
+            origin_x = gutter + column * (tile_width + gutter)
+            origin_y = gutter + row * (tile_height + label_height + gutter)
+            storyboard.paste(
+                image,
+                (origin_x + (tile_width - image.width) // 2, origin_y + (tile_height - image.height) // 2),
+            )
+            draw.text((origin_x + 8, origin_y + tile_height + 7), f"帧 {index + 1}", fill="#ffffff")
+        buffer = BytesIO()
+        storyboard.save(buffer, format="JPEG", quality=88, optimize=True)
+        return buffer.getvalue()
 
     async def submit(
         self,
@@ -200,7 +398,7 @@ class CanvasReplacementTaskService:
         }
         if any(int(shot["index"]) not in prompt_by_shot for shot in shots):
             raise CanvasReplacementTaskError("所选镜头缺少已审核的替换提示词")
-        if any(int(item.get("input_revision") or 0) != 3 for item in prompts):
+        if any(int(item.get("input_revision") or 0) != 5 for item in prompts):
             raise CanvasReplacementTaskError("视频编辑指令使用的是旧结构，请重新生成视频编辑指令后再提交")
 
         logger.info(

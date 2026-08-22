@@ -86,7 +86,7 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
   const activeCount = generatedVersions.filter((version) => version.status === "queued" || version.status === "running").length;
   const completedCount = generatedVersions.filter((version) => version.status === "succeeded").length;
   const isBusy = node.operation?.status === "running";
-  const requiresPromptRebuild = selectedPrompts.some((item) => item.input_revision !== 3);
+  const requiresPromptRebuild = selectedPrompts.some((item) => item.input_revision !== 5);
   const availableModels = videoModels.filter((model) => model.capabilities.includes("subject_replace"));
   const selectedModel = node.operation?.model || availableModels[0]?.id || "";
   const selectedModelIsAvailable = availableModels.some((model) => model.id === selectedModel);
@@ -242,7 +242,7 @@ export function ReplacementTaskNode({ id, data, selected }: NodeProps<CanvasFlow
               || outputVersion?.status === "queued"
               || outputVersion?.status === "running";
             const canSubmit = Boolean(item.prompt.trim())
-              && item.input_revision === 3
+              && item.input_revision === 5
               && !outputIsActive
               && (item.status === "ready" || outputVersion?.status === "failed" || outputVersion?.status === "succeeded");
             return <article key={item.shot_index} className={`canvas-replacement-task__prompt ${editingShotIndex === item.shot_index ? "is-editing" : ""}`}>

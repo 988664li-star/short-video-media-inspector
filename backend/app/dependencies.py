@@ -120,6 +120,7 @@ canvas_replacement_task_service = CanvasReplacementTaskService(
     CanvasReplacementVideoConfig(
         max_asset_bytes=settings.canvas_asset_max_bytes,
     ),
+    siliconflow_vision_client,
     provider_registry=video_generation_registry,
 )
 

@@ -1,3 +1,5 @@
+import asyncio
+
 from backend.app.services.canvas_projects.replacement import (
     CanvasReplacementAnalysisError,
     CanvasReplacementAnalysisService,
@@ -8,6 +10,21 @@ from backend.app.services.canvas_projects.replacement_tasks import (
     CanvasReplacementVideoConfig,
 )
 from backend.app.services.video_generation.providers import SeedanceVideoProvider
+
+
+class FakeVisionClient:
+    async def complete_json(self, **_kwargs):
+        return {"prompt": "多模态生成的视频替换指令", "warning": ""}, {}
+
+
+def replacement_prompt_service() -> CanvasReplacementTaskService:
+    return CanvasReplacementTaskService(
+        project_service=None,  # type: ignore[arg-type] - overridden in prompt assembly tests.
+        object_storage=None,  # type: ignore[arg-type] - prompt rendering needs no object storage.
+        config=CanvasReplacementVideoConfig(max_asset_bytes=1),
+        vision_client=FakeVisionClient(),
+        prompt_templates=CanvasPromptTemplates.load(),
+    )
 
 
 def test_single_shot_observations_use_server_shot_index_and_require_frame_evidence():
@@ -79,16 +96,22 @@ def test_merge_cannot_combine_visually_verified_but_different_products():
     ]
 
 
-def test_per_shot_video_prompt_uses_the_external_template_and_numeric_shot_actions(tmp_path):
-    templates = CanvasPromptTemplates.load()
-    service = CanvasReplacementTaskService(
-        project_service=None,  # type: ignore[arg-type] - prompt rendering needs no local asset access.
-        object_storage=None,  # type: ignore[arg-type] - prompt rendering needs no object storage.
-        config=CanvasReplacementVideoConfig(max_asset_bytes=1),
-        prompt_templates=templates,
-    )
+def test_per_shot_video_prompt_is_composed_per_shot_with_bound_target_images():
+    service = replacement_prompt_service()
+    calls = []
 
-    prompts = service.build_prompts(
+    async def load_references(_project_id, asset_ids):
+        return {asset_id: {"filename": f"{asset_id}.png", "data_uri": "data:image/png;base64,AA=="} for asset_id in asset_ids}
+
+    async def compose(**kwargs):
+        calls.append(kwargs)
+        return {"shot_index": int(kwargs["shot"]["index"]), "prompt": "多模态生成的视频替换指令", "input_revision": 5, "status": "ready"}
+
+    service._load_reference_images = load_references  # type: ignore[method-assign]
+    service._compose_multimodal_prompt = compose  # type: ignore[method-assign]
+
+    prompts = asyncio.run(service.build_prompts(
+        project_id="project-1",
         source_object_name="木质托盘",
         source_object_description="原视频反复展示的深色木质托盘",
         target_description="浅米白大理石纹、香槟金边框与双侧提手托盘",
@@ -98,31 +121,34 @@ def test_per_shot_video_prompt_uses_the_external_template_and_numeric_shot_actio
             "asset_id": "b" * 32, "asset_url": "/asset", "asset_name": "shot-03.mp4",
         }],
         actions=[{"shot_index": 3, "description": "画面中有 2 个托盘：左侧平放桌面，右侧被手持展示。"}],
-    )
+    ))
 
     assert len(prompts) == 1
     assert prompts[0]["status"] == "ready"
-    assert prompts[0]["input_revision"] == 3
-    assert "@视频1" in prompts[0]["prompt"]
-    assert "@图片1" in prompts[0]["prompt"]
-    assert "@图片2" not in prompts[0]["prompt"]
-    assert "画面中有 2 个托盘" in prompts[0]["prompt"]
-    assert "浅米白大理石纹" in prompts[0]["prompt"]
-    assert "保留原视频已有的字幕" in prompts[0]["prompt"]
-    assert "逐一一对一替换" in prompts[0]["prompt"]
+    assert prompts[0]["input_revision"] == 5
+    assert calls[0]["shot"]["index"] == 3
+    assert calls[0]["subject_references"][0][1] == ["a" * 32]
+    assert calls[0]["target_image_references"] == {"a" * 32: "@图片1"}
 
 
 def test_one_prompt_maps_multiple_source_subjects_to_ordered_target_images():
-    service = CanvasReplacementTaskService(
-        project_service=None,  # type: ignore[arg-type] - prompt rendering needs no local asset access.
-        object_storage=None,  # type: ignore[arg-type] - prompt rendering needs no object storage.
-        config=CanvasReplacementVideoConfig(max_asset_bytes=1),
-        prompt_templates=CanvasPromptTemplates.load(),
-    )
+    service = replacement_prompt_service()
+    calls = []
+
+    async def load_references(_project_id, asset_ids):
+        return {asset_id: {"filename": f"{asset_id}.png", "data_uri": "data:image/png;base64,AA=="} for asset_id in asset_ids}
+
+    async def compose(**kwargs):
+        calls.append(kwargs)
+        return {"shot_index": int(kwargs["shot"]["index"]), "prompt": "多主体多模态指令", "input_revision": 5, "status": "ready"}
+
+    service._load_reference_images = load_references  # type: ignore[method-assign]
+    service._compose_multimodal_prompt = compose  # type: ignore[method-assign]
     shoe_asset_id = "a" * 32
     sock_asset_id = "b" * 32
 
-    prompts = service.build_prompts(
+    prompts = asyncio.run(service.build_prompts(
+        project_id="project-1",
         source_object_name="白色运动鞋",
         source_object_description="人物脚上的白色运动鞋",
         target_description="",
@@ -154,15 +180,18 @@ def test_one_prompt_maps_multiple_source_subjects_to_ordered_target_images():
                 "target_asset_ids": [sock_asset_id],
             },
         ],
-    )
+    ))
 
     assert len(prompts) == 1
-    prompt = prompts[0]["prompt"]
-    assert "白色运动鞋" in prompt
-    assert "@图片1 所示的目标对象" in prompt
-    assert "卡通图案袜子" in prompt
-    assert "@图片2 所示的目标对象" in prompt
-    assert "一次完成全部替换" in prompt
+    assert prompts[0]["input_revision"] == 5
+    assert [asset_ids for _, asset_ids in calls[0]["subject_references"]] == [
+        [shoe_asset_id],
+        [sock_asset_id],
+    ]
+    assert calls[0]["target_image_references"] == {
+        shoe_asset_id: "@图片1",
+        sock_asset_id: "@图片2",
+    }
 
 
 def test_replacement_request_uses_one_video_and_target_references():
